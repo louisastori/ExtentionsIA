@@ -41,6 +41,8 @@ export type UiPreferencesSaveMessage = MessageEnvelope<
     model?: string;
     autoApproveWorkspaceEdits?: boolean;
     autoApproveTerminal?: boolean;
+    temperature?: number;
+    systemPrompt?: string;
   }
 >;
 

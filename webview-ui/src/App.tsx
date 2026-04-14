@@ -43,7 +43,11 @@ export function App() {
   const [gpuPollInterval, setGpuPollInterval] = useState('5000');
   const [temperatureInput, setTemperatureInput] = useState('1');
   const [systemPromptInput, setSystemPromptInput] = useState('');
+  const [isTemperatureDirty, setIsTemperatureDirty] = useState(false);
+  const [isSystemPromptDirty, setIsSystemPromptDirty] = useState(false);
   const hasHydratedSelectionRef = useRef(false);
+  const lastHydratedTemperatureRef = useRef<string | null>(null);
+  const lastHydratedSystemPromptRef = useRef<string | null>(null);
 
   useEffect(() => {
     const handler = (event: MessageEvent<unknown>) => {
@@ -95,18 +99,28 @@ export function App() {
     setAutoApproveWorkspaceEdits(session.terminalPolicy.autoApproveWorkspaceEdits);
     setAutoApproveTerminal(session.terminalPolicy.autoApproveTerminal);
     if (typeof session.defaultTemperature === 'number') {
-      setTemperatureInput(session.defaultTemperature.toFixed(2).replace(/\.00$/, ''));
+      const nextTemperature = session.defaultTemperature.toFixed(2).replace(/\.00$/, '');
+      const hasRemoteTemperatureChanged = lastHydratedTemperatureRef.current !== nextTemperature;
+      if (!isTemperatureDirty || hasRemoteTemperatureChanged) {
+        setTemperatureInput(nextTemperature);
+        setIsTemperatureDirty(false);
+      }
+      lastHydratedTemperatureRef.current = nextTemperature;
     }
-    if (typeof session.systemPrompt === 'string') {
-      setSystemPromptInput(session.systemPrompt);
+    const nextSystemPrompt = session.systemPrompt ?? '';
+    const hasRemoteSystemPromptChanged = lastHydratedSystemPromptRef.current !== nextSystemPrompt;
+    if (!isSystemPromptDirty || hasRemoteSystemPromptChanged) {
+      setSystemPromptInput(nextSystemPrompt);
+      setIsSystemPromptDirty(false);
     }
+    lastHydratedSystemPromptRef.current = nextSystemPrompt;
     setGpuGuardEnabled(session.gpuGuard.policy.enabled);
     setGpuProvider(session.gpuGuard.policy.provider);
     setGpuAction(session.gpuGuard.policy.action);
     setGpuMaxTemperature(asInputValue(session.gpuGuard.policy.maxTemperatureC));
     setGpuMaxUtilization(asInputValue(session.gpuGuard.policy.maxUtilizationPercent));
     setGpuPollInterval(asInputValue(session.gpuGuard.policy.pollIntervalMs) || '5000');
-  }, [commandCwd, selectedProfileId, session]);
+  }, [commandCwd, isSystemPromptDirty, isTemperatureDirty, selectedProfileId, session]);
 
   useEffect(() => {
     const previousState = vscodeApi.getState();
@@ -446,7 +460,10 @@ export function App() {
               max={2}
               step={0.05}
               value={Number.isFinite(Number(temperatureInput)) ? Number(temperatureInput) : 1}
-              onChange={(event) => setTemperatureInput(event.target.value)}
+              onChange={(event) => {
+                setTemperatureInput(event.target.value);
+                setIsTemperatureDirty(true);
+              }}
               disabled={session?.isBusy}
             />
             <input
@@ -456,7 +473,10 @@ export function App() {
               max={2}
               step={0.05}
               value={temperatureInput}
-              onChange={(event) => setTemperatureInput(event.target.value)}
+              onChange={(event) => {
+                setTemperatureInput(event.target.value);
+                setIsTemperatureDirty(true);
+              }}
               disabled={session?.isBusy}
             />
           </div>
@@ -468,7 +488,10 @@ export function App() {
           <textarea
             rows={4}
             value={systemPromptInput}
-            onChange={(event) => setSystemPromptInput(event.target.value)}
+            onChange={(event) => {
+              setSystemPromptInput(event.target.value);
+              setIsSystemPromptDirty(true);
+            }}
             placeholder="Ajoute des instructions de haut niveau appliquees a toutes les discussions."
             disabled={session?.isBusy}
           />
@@ -860,6 +883,37 @@ export function App() {
         </section>
       ) : null}
 
+      {session ? (
+        <section className="memory-box">
+          <div className="panel-head">
+            <div>
+              <strong>Memoire et historique</strong>
+              <p className="muted">Les taches terminees restent sauvegardees dans ce workspace et sont reinjectees dans les prochains runs.</p>
+            </div>
+          </div>
+          <div className="memory-list">
+            {session.taskHistory.length ? (
+              session.taskHistory.slice(0, 12).map((entry) => (
+                <article key={entry.id} className={`history-card ${entry.status}`}>
+                  <div className="panel-head">
+                    <div>
+                      <strong>{entry.userText}</strong>
+                      <p className="muted">
+                        {formatModeLabel(entry.mode)} | {formatTaskHistoryStatus(entry.status)} | {formatTimestamp(entry.updatedAt)}
+                      </p>
+                    </div>
+                    {entry.profileLabel ? <span className="section-label">{entry.profileLabel}</span> : null}
+                  </div>
+                  <p className="history-summary">{entry.summary || 'Tache en cours.'}</p>
+                </article>
+              ))
+            ) : (
+              <p className="muted">La memoire va se remplir a partir des prochaines demandes et restera disponible apres redemarrage.</p>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       <main className="transcript">
         {session?.messages.length ? (
           session.messages.map((message) => (
@@ -980,6 +1034,19 @@ function formatCommandStatus(status: CommandRunRecord['status']): string {
   }
 }
 
+function formatTaskHistoryStatus(status: SessionStatePayload['taskHistory'][number]['status']): string {
+  switch (status) {
+    case 'completed':
+      return 'terminee';
+    case 'failed':
+      return 'echouee';
+    case 'cancelled':
+      return 'annulee';
+    default:
+      return 'en cours';
+  }
+}
+
 function formatAgentStatus(status: string): string {
   switch (status) {
     case 'running':
@@ -1055,6 +1122,15 @@ function formatModeLabel(mode: AppMode): string {
     default:
       return mode;
   }
+}
+
+function formatTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString('fr-FR');
 }
 
 function updateAssistantStream(

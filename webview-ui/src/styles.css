@@ -212,6 +212,7 @@ textarea {
 .workspace-roots,
 .agent-box,
 .queue-box,
+.memory-box,
 .panel,
 .bubble,
 .error-banner {
@@ -224,7 +225,8 @@ textarea {
 .gpu-guard-card,
 .workspace-roots,
 .agent-box,
-.queue-box {
+.queue-box,
+.memory-box {
   padding: 12px;
 }
 
@@ -251,6 +253,7 @@ textarea {
   gap: 10px;
 }
 
+.memory-box,
 .gpu-guard-form,
 .gpu-device-list,
 .gpu-guard-meta {
@@ -263,11 +266,45 @@ textarea {
   gap: 8px;
 }
 
+.memory-list {
+  display: grid;
+  gap: 8px;
+}
+
 .queued-prompt {
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
   background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
   padding: 10px;
+}
+
+.history-card {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
+  background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
+  padding: 10px;
+}
+
+.history-card.completed {
+  border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 42%, transparent);
+}
+
+.history-card.failed,
+.history-card.cancelled {
+  border-color: color-mix(in srgb, var(--vscode-errorForeground) 35%, transparent);
+}
+
+.history-card strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.history-summary {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .queued-prompt p {

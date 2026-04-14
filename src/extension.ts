@@ -5,6 +5,7 @@ import { ConfigurationService } from './core/config/configurationService';
 import { SecretStorageService } from './core/config/secretStorageService';
 import { ProviderRegistry } from './core/providers/providerRegistry';
 import { GpuGuardService } from './core/runtime/gpuGuardService';
+import { SessionPersistenceService } from './core/session/sessionPersistenceService';
 import { ToolRuntime } from './core/tools/toolRuntime';
 import { PatchService } from './core/workspace/patchService';
 import { TerminalService } from './core/workspace/terminalService';
@@ -30,6 +31,7 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
   const gpuGuardService = new GpuGuardService();
   const toolRuntime = new ToolRuntime(workspaceService, patchService, terminalService);
   const agentOrchestrator = new AgentOrchestrator(providerRegistry, toolRuntime);
+  const sessionPersistence = new SessionPersistenceService(context.workspaceState);
   const chatWebviewProvider = new ChatWebviewProvider(
     context.extensionUri,
     configurationService,
@@ -38,7 +40,8 @@ export function activate(context: vscode.ExtensionContext): ExtensionApi {
     patchService,
     terminalService,
     agentOrchestrator,
-    gpuGuardService
+    gpuGuardService,
+    sessionPersistence
   );
 
   context.subscriptions.push(

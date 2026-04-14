@@ -156,6 +156,92 @@ export const agentOrchestratorTests: TestCase[] = [
       assert.equal(finalStatus.status, 'completed');
       assert.equal(finalStatus.summary, 'All done after approval.');
     }
+  },
+  {
+    name: 'agent retries once when provider announces an action without tool call',
+    async run() {
+      const capturedMessages: CanonicalAgentMessage[][] = [];
+      const providerTurns: ProviderToolTurn[] = [
+        {
+          text: "First, I'll check the git status to see current changes.",
+          toolCalls: [],
+          finishReason: 'stop'
+        },
+        {
+          text: 'Repository inspected.',
+          toolCalls: [
+            {
+              id: 'tool-git-status',
+              name: 'execute_terminal_command',
+              arguments: {
+                command: 'git status'
+              }
+            }
+          ],
+          finishReason: 'tool_calls'
+        },
+        {
+          text: 'J ai termine.',
+          toolCalls: [
+            {
+              id: 'tool-complete',
+              name: 'complete_task',
+              arguments: {
+                summary: 'Etat du depot verifie et resume pret.'
+              }
+            }
+          ],
+          finishReason: 'tool_calls'
+        }
+      ];
+      const executedTools: string[] = [];
+
+      const orchestrator = new AgentOrchestrator(
+        {
+          async createAgentTurn({ messages }) {
+            capturedMessages.push(messages.map((message) => ({ ...message })));
+            const next = providerTurns.shift();
+            if (!next) {
+              throw new Error('provider called too many times');
+            }
+            return next;
+          }
+        },
+        {
+          async executeToolCall(toolCall): Promise<ToolExecutionResult> {
+            executedTools.push(toolCall.name);
+            return {
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              success: true,
+              content:
+                toolCall.name === 'complete_task'
+                  ? String(toolCall.arguments.summary)
+                  : 'On branch main\nnothing to commit, working tree clean'
+            };
+          }
+        }
+      );
+
+      const finalStatus = await waitForFinalStatus((onStatus) => {
+        orchestrator.startRun({
+          profileId: 'profile',
+          goal: 'Fait un commit',
+          model: 'model',
+          policy: basePolicy,
+          onStatus: onStatus,
+          onApprovalRequired: async () => 'approved'
+        });
+      });
+
+      assert.deepEqual(executedTools, ['execute_terminal_command', 'complete_task']);
+      assert.equal(finalStatus.status, 'completed');
+      assert.equal(finalStatus.summary, 'Etat du depot verifie et resume pret.');
+      assert.equal(capturedMessages.length, 3);
+      assert.ok(
+        capturedMessages[1]?.some((message) => 'content' in message && /Continue en mode agent/.test(String(message.content)))
+      );
+    }
   }
 ];
 

@@ -7,17 +7,27 @@ import type {
   CommandApprovalRequest,
   CommandRunRecord,
   GpuGuardSnapshot,
+  PersistedSessionState,
   QueuedPromptPreview,
   ResolvedProviderProfile,
   SessionSnapshot,
+  TaskHistoryEntry,
   TerminalPolicySnapshot,
   TranscriptMessage
 } from '../types';
 
+const MAX_MESSAGES = 240;
+const MAX_COMMAND_HISTORY = 40;
+const MAX_TASK_HISTORY = 80;
+const MAX_MEMORY_TASKS = 8;
+const MAX_MEMORY_COMMANDS = 4;
+const MAX_MEMORY_BLOCK_LENGTH = 3200;
+
 export class SessionStore {
-  private readonly sessionId = createId('session');
-  private readonly messages: TranscriptMessage[] = [];
-  private readonly commandHistory: CommandRunRecord[] = [];
+  private readonly sessionId: string;
+  private readonly messages: TranscriptMessage[];
+  private readonly commandHistory: CommandRunRecord[];
+  private readonly taskHistory: TaskHistoryEntry[];
   private activeProfileId: string;
   private selectedModel: string;
   private mode: AppMode;
@@ -25,10 +35,21 @@ export class SessionStore {
   private pendingCommandApproval?: CommandApprovalRequest;
   private pendingAgentToolApproval?: AgentToolApprovalRequest;
 
-  public constructor(initialMode: AppMode, initialProfileId: string, initialModel: string) {
-    this.mode = initialMode;
-    this.activeProfileId = initialProfileId;
-    this.selectedModel = initialModel;
+  public constructor(
+    initialMode: AppMode,
+    initialProfileId: string,
+    initialModel: string,
+    persistedState?: PersistedSessionState
+  ) {
+    const restoredState = restorePersistedState(persistedState);
+
+    this.sessionId = restoredState?.sessionId ?? createId('session');
+    this.mode = restoredState?.mode ?? initialMode;
+    this.activeProfileId = restoredState?.activeProfileId ?? initialProfileId;
+    this.selectedModel = restoredState?.selectedModel ?? initialModel;
+    this.messages = restoredState?.messages ?? [];
+    this.commandHistory = restoredState?.commandHistory ?? [];
+    this.taskHistory = restoredState?.taskHistory ?? [];
   }
 
   public hydrateSelection(mode: AppMode, profileId: string, model: string): void {
@@ -45,6 +66,8 @@ export class SessionStore {
     model: string;
     userText: string;
   }): void {
+    const createdAt = new Date().toISOString();
+
     this.mode = input.mode;
     this.activeProfileId = input.profileId;
     this.selectedModel = input.model;
@@ -54,7 +77,7 @@ export class SessionStore {
       id: createId('msg'),
       role: 'user',
       content: input.userText,
-      createdAt: new Date().toISOString(),
+      createdAt,
       runId: input.runId,
       status: 'complete'
     });
@@ -63,13 +86,28 @@ export class SessionStore {
       id: createId('msg'),
       role: 'assistant',
       content: '',
-      createdAt: new Date().toISOString(),
+      createdAt,
       runId: input.runId,
       profileId: input.profileId,
       profileLabel: input.profileLabel,
       model: input.model,
       status: 'streaming'
     });
+
+    this.upsertTaskHistoryEntry({
+      id: createId('task'),
+      runId: input.runId,
+      mode: input.mode,
+      userText: input.userText,
+      summary: '',
+      createdAt,
+      updatedAt: createdAt,
+      profileId: input.profileId,
+      profileLabel: input.profileLabel,
+      model: input.model,
+      status: 'running'
+    });
+    this.trimTranscript();
   }
 
   public appendAssistantDelta(runId: string, textDelta: string): void {
@@ -81,18 +119,25 @@ export class SessionStore {
     message.content += textDelta;
   }
 
-  public completeRun(runId: string): void {
+  public completeRun(runId: string, summaryOverride?: string): void {
     const message = this.findRunAssistantMessage(runId);
     if (message) {
       message.status = 'complete';
     }
+
+    this.finalizeTaskHistory(runId, 'completed', summaryOverride ?? message?.content ?? '');
 
     if (this.busyRunId === runId) {
       this.busyRunId = undefined;
     }
   }
 
-  public failRun(runId: string, errorMessage: string): void {
+  public failRun(
+    runId: string,
+    errorMessage: string,
+    taskStatus: 'failed' | 'cancelled' = 'failed',
+    summaryOverride?: string
+  ): void {
     const message = this.findRunAssistantMessage(runId);
     if (message) {
       if (message.content.trim().length === 0) {
@@ -101,6 +146,8 @@ export class SessionStore {
 
       message.status = 'error';
     }
+
+    this.finalizeTaskHistory(runId, taskStatus, summaryOverride ?? message?.content ?? errorMessage);
 
     if (this.busyRunId === runId) {
       this.busyRunId = undefined;
@@ -161,6 +208,7 @@ export class SessionStore {
     const index = this.commandHistory.findIndex((entry) => entry.runId === run.runId);
     if (index === -1) {
       this.commandHistory.unshift(run);
+      this.trimCommandHistory();
       return;
     }
 
@@ -203,7 +251,7 @@ export class SessionStore {
     return { ...record };
   }
 
-  public buildConversation(systemPrompt: string): CanonicalChatMessage[] {
+  public buildConversation(systemPrompt: string, currentRunId?: string): CanonicalChatMessage[] {
     const transcriptMessages = this.messages
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .filter((message) => message.status !== 'error' || message.content.trim().length > 0)
@@ -216,10 +264,64 @@ export class SessionStore {
     return [
       {
         role: 'system',
-        content: systemPrompt
+        content: mergeSystemPromptWithMemory(systemPrompt, this.buildMemoryContext(currentRunId))
       },
       ...transcriptMessages
     ];
+  }
+
+  public buildMemoryContext(currentRunId?: string): string | undefined {
+    const recentTasks = this.taskHistory.filter((entry) => entry.runId !== currentRunId).slice(0, MAX_MEMORY_TASKS);
+    const recentCommands = this.commandHistory
+      .filter((entry) => entry.status !== 'pending_approval')
+      .slice(0, MAX_MEMORY_COMMANDS);
+
+    if (recentTasks.length === 0 && recentCommands.length === 0) {
+      return undefined;
+    }
+
+    const sections: string[] = ['Memoire persistante du workspace. Appuie-toi sur cet historique pour savoir ce qui a deja ete fait.'];
+
+    if (recentTasks.length > 0) {
+      sections.push('Taches recentes:');
+      for (const entry of recentTasks) {
+        sections.push(
+          `- [${formatTaskStatus(entry.status)} | ${entry.mode}] demande: ${shorten(entry.userText, 140)} | resultat: ${shorten(
+            entry.summary || defaultTaskSummary(entry.status),
+            180
+          )}`
+        );
+      }
+    }
+
+    if (recentCommands.length > 0) {
+      sections.push('Commandes recentes:');
+      for (const entry of recentCommands) {
+        sections.push(
+          `- ${shorten(entry.command, 90)} | ${formatCommandStatus(entry.status)} | code ${formatExitCode(entry.exitCode)}`
+        );
+      }
+    }
+
+    const memoryBlock = sections.join('\n');
+    if (memoryBlock.length <= MAX_MEMORY_BLOCK_LENGTH) {
+      return memoryBlock;
+    }
+
+    return `${memoryBlock.slice(0, MAX_MEMORY_BLOCK_LENGTH - 3)}...`;
+  }
+
+  public exportPersistedState(): PersistedSessionState {
+    return {
+      version: 1,
+      sessionId: this.sessionId,
+      mode: this.mode,
+      activeProfileId: this.activeProfileId,
+      selectedModel: this.selectedModel,
+      messages: [...this.messages],
+      commandHistory: [...this.commandHistory],
+      taskHistory: [...this.taskHistory]
+    };
   }
 
   public createSnapshot(
@@ -250,6 +352,7 @@ export class SessionStore {
       gpuGuard,
       profiles,
       queuedPrompts: [...queuedPrompts],
+      taskHistory: [...this.taskHistory],
       messages: [...this.messages]
     };
   }
@@ -257,6 +360,107 @@ export class SessionStore {
   private findRunAssistantMessage(runId: string): TranscriptMessage | undefined {
     return [...this.messages].reverse().find((message) => message.role === 'assistant' && message.runId === runId);
   }
+
+  private upsertTaskHistoryEntry(entry: TaskHistoryEntry): void {
+    const index = this.taskHistory.findIndex((item) => item.runId === entry.runId);
+    if (index === -1) {
+      this.taskHistory.unshift(entry);
+      this.trimTaskHistory();
+      return;
+    }
+
+    this.taskHistory[index] = entry;
+  }
+
+  private finalizeTaskHistory(runId: string, status: TaskHistoryEntry['status'], summary: string): void {
+    const entry = this.taskHistory.find((item) => item.runId === runId);
+    if (!entry) {
+      return;
+    }
+
+    entry.status = status;
+    entry.summary = shorten(summary.trim() || defaultTaskSummary(status), 320);
+    entry.updatedAt = new Date().toISOString();
+  }
+
+  private trimTranscript(): void {
+    if (this.messages.length <= MAX_MESSAGES) {
+      return;
+    }
+
+    this.messages.splice(0, this.messages.length - MAX_MESSAGES);
+  }
+
+  private trimCommandHistory(): void {
+    if (this.commandHistory.length <= MAX_COMMAND_HISTORY) {
+      return;
+    }
+
+    this.commandHistory.splice(MAX_COMMAND_HISTORY);
+  }
+
+  private trimTaskHistory(): void {
+    if (this.taskHistory.length <= MAX_TASK_HISTORY) {
+      return;
+    }
+
+    this.taskHistory.splice(MAX_TASK_HISTORY);
+  }
+}
+
+function restorePersistedState(state: PersistedSessionState | undefined): PersistedSessionState | undefined {
+  if (!state) {
+    return undefined;
+  }
+
+  const recoveredAt = new Date().toISOString();
+
+  return {
+    ...state,
+    messages: state.messages
+      .slice(-MAX_MESSAGES)
+      .map((message) =>
+        message.status === 'streaming'
+          ? {
+              ...message,
+              status: 'error',
+              content: message.content.trim().length > 0 ? message.content : 'Session precedente interrompue.'
+            }
+          : message
+      ),
+    commandHistory: state.commandHistory.slice(0, MAX_COMMAND_HISTORY).map((entry) => {
+      if (entry.status !== 'running' && entry.status !== 'pending_approval') {
+        return entry;
+      }
+
+      return {
+        ...entry,
+        status: 'cancelled',
+        endedAt: entry.endedAt ?? recoveredAt,
+        exitCode: null
+      };
+    }),
+    taskHistory: state.taskHistory.slice(0, MAX_TASK_HISTORY).map((entry) => {
+      if (entry.status !== 'running') {
+        return entry;
+      }
+
+      return {
+        ...entry,
+        status: 'cancelled',
+        summary: entry.summary.trim() || 'Session precedente interrompue avant la fin.',
+        updatedAt: recoveredAt
+      };
+    })
+  };
+}
+
+function mergeSystemPromptWithMemory(systemPrompt: string, memoryContext: string | undefined): string {
+  if (!memoryContext) {
+    return systemPrompt;
+  }
+
+  return `${systemPrompt}\n\n${memoryContext}`;
 }
 
 function capOutput(value: string): string {
@@ -266,4 +470,64 @@ function capOutput(value: string): string {
   }
 
   return value.slice(value.length - maxLength);
+}
+
+function shorten(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 3)}...`;
+}
+
+function formatTaskStatus(status: TaskHistoryEntry['status']): string {
+  switch (status) {
+    case 'completed':
+      return 'termine';
+    case 'failed':
+      return 'echoue';
+    case 'cancelled':
+      return 'annule';
+    default:
+      return 'en cours';
+  }
+}
+
+function formatCommandStatus(status: CommandRunRecord['status']): string {
+  switch (status) {
+    case 'completed':
+      return 'terminee';
+    case 'failed':
+      return 'echouee';
+    case 'cancelled':
+      return 'annulee';
+    case 'rejected':
+      return 'refusee';
+    case 'running':
+      return 'en cours';
+    default:
+      return status;
+  }
+}
+
+function formatExitCode(value: number | null | undefined): string {
+  if (value === undefined) {
+    return 'n/a';
+  }
+
+  return value === null ? 'null' : String(value);
+}
+
+function defaultTaskSummary(status: TaskHistoryEntry['status']): string {
+  switch (status) {
+    case 'completed':
+      return 'Tache terminee.';
+    case 'failed':
+      return 'La tache a echoue.';
+    case 'cancelled':
+      return 'La tache a ete interrompue.';
+    default:
+      return 'Tache en cours.';
+  }
 }

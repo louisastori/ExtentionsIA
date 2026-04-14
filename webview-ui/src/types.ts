@@ -21,6 +21,19 @@ export interface TranscriptMessage {
   status: 'complete' | 'streaming' | 'error';
 }
 
+export interface TaskHistoryEntry {
+  id: string;
+  runId: string;
+  mode: AppMode;
+  userText: string;
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+  profileLabel?: string;
+  model?: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+}
+
 export interface QueuedPromptPreview {
   id: string;
   mode: AppMode;
@@ -46,6 +59,7 @@ export interface SessionSnapshot {
   gpuGuard: GpuGuardSnapshot;
   profiles: ResolvedProviderProfile[];
   queuedPrompts: QueuedPromptPreview[];
+  taskHistory: TaskHistoryEntry[];
   messages: TranscriptMessage[];
 }
 

@@ -25,6 +25,7 @@ import {
 import { ProviderRegistry } from '../core/providers/providerRegistry';
 import { joinUrl, requestJson } from '../core/providers/httpClient';
 import { GpuGuardService, createEmptyGpuGuardSnapshot } from '../core/runtime/gpuGuardService';
+import { SessionPersistenceService } from '../core/session/sessionPersistenceService';
 import { SessionStore } from '../core/session/sessionStore';
 import { PatchService } from '../core/workspace/patchService';
 import { TerminalService } from '../core/workspace/terminalService';
@@ -75,17 +76,20 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     private readonly patchService: PatchService,
     private readonly terminalService: TerminalService,
     private readonly agentOrchestrator: AgentOrchestrator,
-    private readonly gpuGuardService: GpuGuardService
+    private readonly gpuGuardService: GpuGuardService,
+    private readonly sessionPersistence: SessionPersistenceService
   ) {
     const providersConfig = this.configurationService.getProvidersConfig();
     const fallbackProfile = providersConfig.profiles[0];
     const activeProfile =
       providersConfig.profiles.find((profile) => profile.id === providersConfig.activeProfileId) ?? fallbackProfile;
+    const restoredSession = this.sessionPersistence.load();
 
     this.sessionStore = new SessionStore(
       this.configurationService.getDefaultMode(),
       activeProfile?.id ?? 'ollama-local',
-      this.configurationService.getDefaultModel(activeProfile?.model ?? 'local-model')
+      this.configurationService.getDefaultModel(activeProfile?.model ?? 'local-model'),
+      restoredSession
     );
     this.currentGpuGuardState = createEmptyGpuGuardSnapshot(this.configurationService.getGpuGuardPolicy());
   }
@@ -305,7 +309,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         profileId: selectedProfile.id,
         model: selectedModel,
         messages: this.sessionStore.buildConversation(
-          buildSystemPrompt(message.payload.mode, this.configurationService.getSystemPromptOverride())
+          buildSystemPrompt(message.payload.mode, this.configurationService.getSystemPromptOverride()),
+          runId
         ),
         signal: this.currentAbortController.signal
       });
@@ -339,7 +344,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       const errorMessage = normalizeErrorMessage(error);
       const wasCancelled = errorMessage.toLowerCase().includes('aborted');
 
-      this.sessionStore.failRun(runId, wasCancelled ? 'Réponse interrompue.' : errorMessage);
+      this.sessionStore.failRun(runId, wasCancelled ? 'Réponse interrompue.' : errorMessage, wasCancelled ? 'cancelled' : 'failed');
       this.postRunStatus(
         {
           runId,
@@ -370,6 +375,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const profiles = await this.providerRegistry.getResolvedProfiles();
     const defaultTemperature = this.configurationService.getDefaultTemperature();
     const systemPrompt = this.configurationService.getSystemPromptOverride();
+    await this.sessionPersistence.save(this.sessionStore.exportPersistedState());
     this.postMessage(
       createHostMessage(
         'host.session.state',
@@ -475,7 +481,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         createHostMessage(
           'host.preferences.saved',
           {
-            message: 'Fournisseur, mode, modele et politiques d approbation sauvegardes.'
+            message: 'Fournisseur, mode, modele, temperature, system prompt et politiques d approbation sauvegardes.'
           },
           requestId
         )
@@ -572,6 +578,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       profileId: input.selectedProfile.id,
       model: input.selectedModel,
       goal: input.userText,
+      memoryContext: this.sessionStore.buildMemoryContext(input.runId),
       policy: this.configurationService.getAgentLoopPolicy(),
       signal: this.currentAbortController.signal,
       onStatus: (snapshot) => {
@@ -587,9 +594,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           }
 
           if (snapshot.status === 'completed') {
-            this.sessionStore.completeRun(input.runId);
+            this.sessionStore.completeRun(input.runId, snapshot.summary?.trim() || finalText);
           } else {
-            this.sessionStore.failRun(input.runId, finalText || 'L execution agent a echoue.');
+            this.sessionStore.failRun(
+              input.runId,
+              finalText || 'L execution agent a echoue.',
+              snapshot.status === 'cancelled' ? 'cancelled' : 'failed',
+              snapshot.summary?.trim() || finalText
+            );
           }
 
           this.currentAgentHandle = undefined;

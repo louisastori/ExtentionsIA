@@ -46,6 +46,7 @@ export class AgentOrchestrator {
     profileId: string;
     model?: string;
     goal: string;
+    memoryContext?: string;
     policy: AgentLoopPolicy;
     signal?: AbortSignal;
     onStatus: (snapshot: AgentRunSnapshot) => void;
@@ -92,11 +93,12 @@ export class AgentOrchestrator {
     let iteration = 0;
     let toolCallsUsed = 0;
     let consecutiveFailures = 0;
+    let textOnlyRetryCount = 0;
     let summary = '';
     const messages: CanonicalAgentMessage[] = [
       {
         role: 'system',
-        content: buildAgentSystemPrompt(input.policy)
+        content: buildAgentSystemPrompt(input.policy, input.memoryContext)
       },
       {
         role: 'user',
@@ -133,11 +135,22 @@ export class AgentOrchestrator {
           publishStatus(buildSnapshot('running', { lastAssistantText: turn.text }));
 
           if (turn.toolCalls.length === 0) {
+            if (shouldRetryAfterTextOnlyTurn(turn.text, textOnlyRetryCount)) {
+              textOnlyRetryCount += 1;
+              messages.push({
+                role: 'user',
+                content:
+                  'Continue en mode agent. Ne t arrete pas apres avoir decrit une intention. Appelle maintenant l outil adapte pour agir sur le workspace, ou appelle complete_task si le travail est vraiment termine.'
+              });
+              continue;
+            }
+
             summary = turn.text.trim();
             publishStatus(buildSnapshot('completed', { stopReason: 'assistant_completed_without_tool_call', summary }));
             return;
           }
 
+          textOnlyRetryCount = 0;
           iteration += 1;
 
           for (const toolCall of turn.toolCalls) {
@@ -242,19 +255,41 @@ function ensureBudgets(
   }
 }
 
-function buildAgentSystemPrompt(policy: AgentLoopPolicy): string {
-  return [
+function buildAgentSystemPrompt(policy: AgentLoopPolicy, memoryContext?: string): string {
+  const sections = [
     'Tu es esctentionIALocal en mode agent borne dans VS Code.',
     'Reponds toujours en francais, sauf si l utilisateur demande explicitement une autre langue.',
     'Utilise les outils disponibles pour inspecter les fichiers, rechercher dans le workspace, creer de nouveaux fichiers, appliquer des patches cibles sur les fichiers existants, executer des commandes terminal quand elles sont autorisees, puis terminer avec complete_task.',
     'Quand un outil attend un chemin de fichier, utilise toujours un chemin relatif a la racine du workspace.',
     'Si l utilisateur demande des modifications du workspace, utilise create_file pour les nouveaux fichiers et apply_patch pour les fichiers existants au lieu de repondre uniquement avec du code.',
     'Agis immediatement sur la demande au lieu de demander une confirmation.',
+    'N ecris pas seulement ce que tu vas faire. Si tu dois verifier, lire, chercher, modifier ou lancer une commande, emets l appel d outil correspondant dans le meme tour.',
     'Fais des suppositions raisonnables, choisis l implementation la plus pratique et avance jusqu a la fin de la tache.',
     'Pose une question uniquement si un detail manquant rend le changement dangereux ou impossible.',
     'Ne declare pas la tache terminee sans appeler complete_task ou sans fournir une reponse finale claire quand aucun autre outil n est necessaire.',
     'N essaie jamais d acceder a des fichiers en dehors du workspace.',
     `Tu es borne par maxIterations=${policy.maxIterations}, maxToolCalls=${policy.maxToolCalls}, timeBudgetMs=${policy.timeBudgetMs}.`,
     `Modifications du workspace auto-approuvees: ${policy.autoApproveWorkspaceEdits}. Terminal auto-approuve: ${policy.autoApproveTerminal}.`
-  ].join(' ');
+  ];
+
+  if (memoryContext) {
+    sections.push(memoryContext);
+  }
+
+  return sections.join(' ');
+}
+
+function shouldRetryAfterTextOnlyTurn(text: string, textOnlyRetryCount: number): boolean {
+  if (textOnlyRetryCount >= 1) {
+    return false;
+  }
+
+  const normalized = text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, ' ');
+
+  return /\b(i(?:\s|')?ll|i will|let me|first|next|checking|check|inspect|search|read|open|modify|patch|run|commit|verify|je vais|d abord|ensuite|je commence|je verifie|verifier|regarder|chercher|lire|ouvrir|modifier|appliquer|lancer)\b/.test(
+    normalized
+  );
 }
