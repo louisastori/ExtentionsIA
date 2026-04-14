@@ -1,9 +1,15 @@
 .eslintrc.cjs
+.github/**
+.gitignore
+.tmp/**
 .vscode-test.js
 .vscode/**
 .vscode-test/**
+debug.log
+dist/**
 node_modules/**
 openspec/**
+scripts/**
 src/**
 webview-ui/**
 out/test/**
