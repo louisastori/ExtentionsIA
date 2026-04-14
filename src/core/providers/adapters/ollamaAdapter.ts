@@ -37,6 +37,7 @@ export class OllamaAdapter implements LlmProviderAdapter {
       },
       body: JSON.stringify({
         model: request.model,
+        think: false,
         messages: request.messages.map((message) => ({
           role: message.role,
           content: message.content
@@ -73,6 +74,7 @@ export class OllamaAdapter implements LlmProviderAdapter {
       },
       body: JSON.stringify({
         model: request.model,
+        think: false,
         messages: request.messages.map((message) => toOllamaMessage(message)),
         tools: request.tools.map((tool) => ({
           type: 'function',

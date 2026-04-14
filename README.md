@@ -15,6 +15,7 @@ Extension VS Code orientee agent de code. Par defaut, elle demarre en mode local
 
 - mode local-only active par defaut: profils locaux uniquement, sans `API key missing`
 - chat local avec selection de provider/modele
+- profil local pret pour `Ollama Gemma 4 26B` via `gemma4:26b`
 - lecture de fichiers et recherche workspace
 - apercu diff et `apply_patch` avec approbation
 - terminal/tests avec historique, capture `stdout/stderr`, stop et policy

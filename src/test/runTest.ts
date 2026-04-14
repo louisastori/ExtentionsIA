@@ -1,10 +1,19 @@
 import { agentOrchestratorTests } from './agentOrchestrator.test';
 import { gpuGuardServiceTests } from './gpuGuardService.test';
 import { ollamaAdapterTests } from './ollamaAdapter.test';
+import { sessionStoreTests } from './sessionStore.test';
+import { systemPromptTests } from './systemPrompt.test';
 import { toolRuntimeTests } from './toolRuntime.test';
 
 async function main(): Promise<void> {
-  const tests = [...toolRuntimeTests, ...agentOrchestratorTests, ...gpuGuardServiceTests, ...ollamaAdapterTests];
+  const tests = [
+    ...toolRuntimeTests,
+    ...agentOrchestratorTests,
+    ...systemPromptTests,
+    ...gpuGuardServiceTests,
+    ...ollamaAdapterTests,
+    ...sessionStoreTests
+  ];
   let passed = 0;
 
   for (const test of tests) {

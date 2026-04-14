@@ -77,8 +77,10 @@ export class ProviderRegistry {
       );
     }
 
+    const profileWithTemperature = this.applyDefaultTemperature(profile);
+
     return adapter.createChatCompletion({
-      profile,
+      profile: profileWithTemperature,
       model: request.model?.trim() || profile.model,
       apiKey,
       messages: request.messages,
@@ -113,14 +115,32 @@ export class ProviderRegistry {
       );
     }
 
+    const profileWithTemperature = this.applyDefaultTemperature(profile);
+
     return adapter.createAgentTurn({
-      profile,
+      profile: profileWithTemperature,
       model: request.model?.trim() || profile.model,
       apiKey,
       messages: request.messages,
       tools: request.tools,
       signal: request.signal
     });
+  }
+
+  private applyDefaultTemperature(profile: ProviderProfile): ProviderProfile {
+    const configuredTemperature = this.configurationService.getDefaultTemperature(profile.temperature);
+    if (typeof configuredTemperature !== 'number') {
+      return profile;
+    }
+
+    if (configuredTemperature === profile.temperature) {
+      return profile;
+    }
+
+    return {
+      ...profile,
+      temperature: configuredTemperature
+    };
   }
 }
 

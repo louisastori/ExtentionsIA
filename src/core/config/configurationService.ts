@@ -25,6 +25,20 @@ export class ConfigurationService {
     return configuredModel || fallbackModel;
   }
 
+  public getDefaultTemperature(fallback?: number): number | undefined {
+    const configuredTemperature = this.getConfiguration().get<number | undefined>('defaultTemperature', undefined);
+    if (typeof configuredTemperature !== 'number' || !Number.isFinite(configuredTemperature)) {
+      return fallback;
+    }
+
+    return Math.max(0, Math.min(2, configuredTemperature));
+  }
+
+  public getSystemPromptOverride(): string | undefined {
+    const configuredPrompt = this.getConfiguration().get<string>('systemPrompt', '').trim();
+    return configuredPrompt.length > 0 ? configuredPrompt : undefined;
+  }
+
   public isLocalOnlyMode(): boolean {
     return this.getConfiguration().get<boolean>('localOnlyMode', true);
   }
@@ -69,6 +83,8 @@ export class ConfigurationService {
     model: string;
     autoApproveWorkspaceEdits?: boolean;
     autoApproveTerminal?: boolean;
+    temperature?: number;
+    systemPrompt?: string;
   }): Promise<void> {
     const configuration = this.getConfiguration();
     const target = vscode.ConfigurationTarget.Global;
@@ -78,6 +94,15 @@ export class ConfigurationService {
       configuration.update('defaultMode', input.mode, target),
       configuration.update('defaultModel', input.model.trim(), target)
     ];
+
+    if (typeof input.temperature === 'number' && Number.isFinite(input.temperature)) {
+      const normalized = Math.max(0, Math.min(2, input.temperature));
+      operations.push(configuration.update('defaultTemperature', normalized, target));
+    }
+
+    if (typeof input.systemPrompt === 'string') {
+      operations.push(configuration.update('systemPrompt', input.systemPrompt, target));
+    }
 
     if (typeof input.autoApproveWorkspaceEdits === 'boolean') {
       operations.push(configuration.update('agent.autoApproveWorkspaceEdits', input.autoApproveWorkspaceEdits, target));
@@ -114,7 +139,7 @@ export class ConfigurationService {
     return {
       maxIterations: configuration.get<number>('agent.maxIterations', 12),
       maxToolCalls: configuration.get<number>('agent.maxToolCalls', 30),
-      timeBudgetMs: configuration.get<number>('agent.timeBudgetMs', 600000),
+      timeBudgetMs: configuration.get<number>('agent.timeBudgetMs', 1800000),
       maxConsecutiveFailures: configuration.get<number>('agent.maxConsecutiveFailures', 3),
       autoApproveReadOnlyTools: configuration.get<boolean>('agent.autoApproveReadOnlyTools', true),
       autoApproveWorkspaceEdits: configuration.get<boolean>('agent.autoApproveWorkspaceEdits', false),

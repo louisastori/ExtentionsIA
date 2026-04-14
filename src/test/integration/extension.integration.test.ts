@@ -48,7 +48,8 @@ suite('Extension Integration', () => {
     assert.equal(configurationService.getDefaultMode(), 'chat');
     assert.equal(configurationService.isLocalOnlyMode(), true);
     assert.ok(providers.profiles.length > 0);
-    assert.equal(providers.activeProfileId, 'ollama-local');
+    assert.equal(providers.activeProfileId, 'ollama-gemma4-26b-local');
+    assert.equal(configurationService.getDefaultTemperature(), 1);
     assert.ok(providers.profiles.every((profile) => profile.providerType === 'ollama' || profile.providerType === 'openai-compatible'));
   });
 

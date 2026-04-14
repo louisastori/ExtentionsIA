@@ -52,7 +52,7 @@
       "properties": {
         "esctentionialocal.defaultProfileId": {
           "type": "string",
-          "default": "ollama-local",
+          "default": "ollama-gemma4-26b-local",
           "description": "Profil fournisseur utilise par defaut."
         },
         "esctentionialocal.defaultMode": {
@@ -70,6 +70,18 @@
           "type": "string",
           "default": "",
           "description": "Modele utilise par defaut pour les nouvelles executions."
+        },
+        "esctentionialocal.defaultTemperature": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Temperature par defaut pour les fournisseurs qui la supportent (0 = deterministe, 2 = creatif)."
+        },
+        "esctentionialocal.systemPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "Instructions systeme additionnelles appliquees a toutes les discussions."
         },
         "esctentionialocal.localOnlyMode": {
           "type": "boolean",
@@ -95,7 +107,7 @@
         },
         "esctentionialocal.agent.timeBudgetMs": {
           "type": "number",
-          "default": 600000,
+          "default": 1800000,
           "minimum": 1000,
           "description": "Budget temps maximum pour une execution agentique."
         },

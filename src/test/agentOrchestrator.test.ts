@@ -3,6 +3,7 @@ import { AgentOrchestrator } from '../core/agent/agentOrchestrator';
 import type {
   AgentLoopPolicy,
   AgentRunSnapshot,
+  CanonicalAgentMessage,
   CanonicalToolCall,
   ProviderToolTurn,
   ToolExecutionResult
@@ -26,6 +27,7 @@ export const agentOrchestratorTests: TestCase[] = [
     name: 'agent completes when provider returns final text without tools',
     async run() {
       const statuses: AgentRunSnapshot[] = [];
+      const capturedMessages: CanonicalAgentMessage[][] = [];
       const providerCalls: ProviderToolTurn[] = [
         {
           text: 'Task complete without tools.',
@@ -35,7 +37,8 @@ export const agentOrchestratorTests: TestCase[] = [
       ];
       const orchestrator = new AgentOrchestrator(
         {
-          async createAgentTurn() {
+          async createAgentTurn({ messages }) {
+            capturedMessages.push(messages);
             return providerCalls.shift() ?? { text: '', toolCalls: [], finishReason: 'stop' };
           }
         },
@@ -63,6 +66,7 @@ export const agentOrchestratorTests: TestCase[] = [
       assert.equal(finalStatus.status, 'completed');
       assert.equal(finalStatus.summary, 'Task complete without tools.');
       assert.equal(statuses[0]?.status, 'running');
+      assert.match(String(capturedMessages[0]?.[0]?.content), /Reponds toujours en francais/);
     }
   },
   {

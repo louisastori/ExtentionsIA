@@ -21,11 +21,20 @@ export interface TranscriptMessage {
   status: 'complete' | 'streaming' | 'error';
 }
 
+export interface QueuedPromptPreview {
+  id: string;
+  mode: AppMode;
+  textPreview: string;
+  createdAt: string;
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   mode: AppMode;
   activeProfileId: string;
   selectedModel: string;
+  defaultTemperature?: number;
+  systemPrompt?: string;
   isBusy: boolean;
   busyRunId?: string;
   currentAgentRun?: AgentRunSnapshot;
@@ -36,6 +45,7 @@ export interface SessionSnapshot {
   terminalPolicy: TerminalPolicySnapshot;
   gpuGuard: GpuGuardSnapshot;
   profiles: ResolvedProviderProfile[];
+  queuedPrompts: QueuedPromptPreview[];
   messages: TranscriptMessage[];
 }
 
@@ -208,6 +218,8 @@ export type UiMessage =
         model?: string;
         autoApproveWorkspaceEdits?: boolean;
         autoApproveTerminal?: boolean;
+        temperature?: number;
+        systemPrompt?: string;
       }
     >
   | MessageEnvelope<'ui.agent.stop', { runId?: string }>

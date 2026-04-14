@@ -123,6 +123,7 @@ export const ollamaAdapterTests: TestCase[] = [
         assert.equal(toolMessage.role, 'tool');
         assert.equal(toolMessage.tool_name, 'read_file');
         assert.equal(toolMessage.content, '<html></html>');
+        assert.equal(capturedBody?.think, false);
       } finally {
         server.close();
       }

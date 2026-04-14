@@ -7,6 +7,7 @@ import type {
   CommandApprovalRequest,
   CommandRunRecord,
   GpuGuardSnapshot,
+  QueuedPromptPreview,
   ResolvedProviderProfile,
   SessionSnapshot,
   TerminalPolicySnapshot,
@@ -226,13 +227,18 @@ export class SessionStore {
     workspaceFolders: string[],
     terminalPolicy: TerminalPolicySnapshot,
     gpuGuard: GpuGuardSnapshot,
-    currentAgentRun?: AgentRunSnapshot
+    defaultTemperature: number | undefined,
+    systemPrompt: string | undefined,
+    currentAgentRun?: AgentRunSnapshot,
+    queuedPrompts: QueuedPromptPreview[] = []
   ): SessionSnapshot {
     return {
       sessionId: this.sessionId,
       mode: this.mode,
       activeProfileId: this.activeProfileId,
       selectedModel: this.selectedModel,
+      defaultTemperature,
+      systemPrompt,
       isBusy: this.busyRunId !== undefined,
       busyRunId: this.busyRunId,
       currentAgentRun,
@@ -243,6 +249,7 @@ export class SessionStore {
       terminalPolicy,
       gpuGuard,
       profiles,
+      queuedPrompts: [...queuedPrompts],
       messages: [...this.messages]
     };
   }

@@ -15,10 +15,15 @@ const COMMAND_PRESETS = [
   { label: 'npm run lint', command: 'npm run lint' },
   { label: 'npm run build', command: 'npm run build' }
 ];
+const DEFAULT_ASSISTANT_ACTIVITY: AssistantActivity = {
+  tone: 'idle',
+  label: 'IA au repos',
+  detail: 'Aucune execution en cours'
+};
 
 export function App() {
   const initialViewState = useMemo(() => vscodeApi.getState(), []);
-  const [session, setSession] = useState<Extract<HostMessage, { type: 'host.session.state' }>['payload'] | null>(null);
+  const [session, setSession] = useState<SessionStatePayload | null>(null);
   const [draft, setDraft] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState(initialViewState?.selectedProfileId ?? '');
   const [selectedMode, setSelectedMode] = useState<AppMode>(initialViewState?.selectedMode ?? 'chat');
@@ -26,6 +31,7 @@ export function App() {
   const [autoApproveWorkspaceEdits, setAutoApproveWorkspaceEdits] = useState(false);
   const [autoApproveTerminal, setAutoApproveTerminal] = useState(false);
   const [statusText, setStatusText] = useState('Au repos');
+  const [assistantActivity, setAssistantActivity] = useState<AssistantActivity>(DEFAULT_ASSISTANT_ACTIVITY);
   const [errorText, setErrorText] = useState<string | null>(null);
   const [commandInput, setCommandInput] = useState('');
   const [commandCwd, setCommandCwd] = useState('');
@@ -35,9 +41,9 @@ export function App() {
   const [gpuMaxTemperature, setGpuMaxTemperature] = useState('');
   const [gpuMaxUtilization, setGpuMaxUtilization] = useState('');
   const [gpuPollInterval, setGpuPollInterval] = useState('5000');
-  const hasHydratedSelectionRef = useRef(
-    Boolean(initialViewState?.selectedProfileId || initialViewState?.selectedMode || initialViewState?.modelInput)
-  );
+  const [temperatureInput, setTemperatureInput] = useState('1');
+  const [systemPromptInput, setSystemPromptInput] = useState('');
+  const hasHydratedSelectionRef = useRef(false);
 
   useEffect(() => {
     const handler = (event: MessageEvent<unknown>) => {
@@ -67,7 +73,9 @@ export function App() {
   );
   const currentAgentRun = session?.currentAgentRun;
   const pendingAgentToolApproval = session?.pendingAgentToolApproval;
+  const queuedPrompts = session?.queuedPrompts ?? [];
   const canSaveSelection = Boolean(session && !session.isBusy && activeProfile);
+  const canSubmit = draft.trim().length > 0 && Boolean(session && activeProfile);
 
   useEffect(() => {
     if (!session) {
@@ -86,6 +94,12 @@ export function App() {
     }
     setAutoApproveWorkspaceEdits(session.terminalPolicy.autoApproveWorkspaceEdits);
     setAutoApproveTerminal(session.terminalPolicy.autoApproveTerminal);
+    if (typeof session.defaultTemperature === 'number') {
+      setTemperatureInput(session.defaultTemperature.toFixed(2).replace(/\.00$/, ''));
+    }
+    if (typeof session.systemPrompt === 'string') {
+      setSystemPromptInput(session.systemPrompt);
+    }
     setGpuGuardEnabled(session.gpuGuard.policy.enabled);
     setGpuProvider(session.gpuGuard.policy.provider);
     setGpuAction(session.gpuGuard.policy.action);
@@ -105,22 +119,50 @@ export function App() {
     });
   }, [modelInput, selectedMode, selectedProfileId, session?.sessionId]);
 
-  const canSubmit = draft.trim().length > 0 && !session?.isBusy;
+  function handleProfileChange(nextProfileId: string): void {
+    setSelectedProfileId(nextProfileId);
+    const nextProfile = session?.profiles.find((profile) => profile.id === nextProfileId);
+    if (nextProfile) {
+      setModelInput(nextProfile.model);
+    }
+  }
 
   function handleHostMessage(message: HostMessage): void {
     if (message.type === 'host.session.state') {
       setSession(message.payload);
+      setAssistantActivity((current) => deriveAssistantActivityFromSession(message.payload, current));
       setErrorText(null);
-      setStatusText(message.payload.isBusy ? 'Conversation en cours' : 'Pret');
+      setStatusText((current) => {
+        const queuedStatus = formatQueuedPromptCount(message.payload.queuedPrompts.length);
+        if (message.payload.isBusy) {
+          if (current === 'Au repos' || current === 'Pret' || current.startsWith('File d attente')) {
+            return queuedStatus ? `Conversation en cours | ${queuedStatus}` : 'Conversation en cours';
+          }
+
+          return current;
+        }
+
+        if (message.payload.queuedPrompts.length > 0) {
+          return `File d attente | ${queuedStatus}`;
+        }
+
+        return current === 'Au repos' ? 'Pret' : current;
+      });
       return;
     }
 
     if (message.type === 'host.stream.delta') {
       setSession((current) => updateAssistantStream(current, message.payload.runId, message.payload.textDelta));
+      setAssistantActivity({
+        tone: 'running',
+        label: 'IA en cours',
+        detail: 'Generation de la reponse'
+      });
       return;
     }
 
     if (message.type === 'host.run.status') {
+      setAssistantActivity(createAssistantActivityFromRunStatus(message.payload.status, message.payload.stopReason));
       setStatusText(
         `${formatRunStatus(message.payload.status)}${message.payload.stopReason ? ` | ${formatStopReason(message.payload.stopReason)}` : ''}`
       );
@@ -169,6 +211,7 @@ export function App() {
           currentAgentRun: message.payload
         };
       });
+      setAssistantActivity(createAssistantActivityFromAgentRun(message.payload));
       setStatusText(
         `Agent ${formatAgentStatus(message.payload.status)} | iteration ${message.payload.iteration} | outils ${message.payload.toolCallsUsed}`
       );
@@ -185,6 +228,11 @@ export function App() {
           ...current,
           pendingAgentToolApproval: message.payload
         };
+      });
+      setAssistantActivity({
+        tone: 'warning',
+        label: 'IA en attente',
+        detail: `Approbation requise pour ${message.payload.toolName}`
       });
       setStatusText(`Agent en attente d'approbation | ${message.payload.toolName}`);
       return;
@@ -217,6 +265,9 @@ export function App() {
     );
     setDraft('');
     setErrorText(null);
+    if (session?.isBusy || queuedPrompts.length > 0) {
+      setStatusText(`Ajoute a la file d attente | ${formatQueuedPromptCount(queuedPrompts.length + 1)}`);
+    }
   }
 
   function handleStopChat(): void {
@@ -314,13 +365,16 @@ export function App() {
       return;
     }
 
+    const parsedTemperature = parseOptionalNumber(temperatureInput);
     postMessage(
       createMessage('ui.preferences.save', {
         profileId: selectedProfileId || activeProfile?.id,
         mode: selectedMode,
         model: modelInput.trim() || undefined,
         autoApproveWorkspaceEdits,
-        autoApproveTerminal
+        autoApproveTerminal,
+        temperature: parsedTemperature,
+        systemPrompt: systemPromptInput.trim()
       })
     );
   }
@@ -336,7 +390,13 @@ export function App() {
           <p className="eyebrow">esctentionIALocal</p>
           <h1>Agent phase 4</h1>
         </div>
-        <div className={`status-pill ${session?.isBusy || runningCommand ? 'busy' : ''}`}>{statusText}</div>
+        <div className="topbar-status" aria-live="polite">
+          <div className={`status-pill ${assistantActivity.tone}`}>
+            <span className={`status-dot ${assistantActivity.tone}`} aria-hidden="true" />
+            <span>{assistantActivity.label}</span>
+          </div>
+          <p className="status-caption">{statusText}</p>
+        </div>
       </header>
 
       <section className="control-grid">
@@ -344,7 +404,7 @@ export function App() {
           <span>Fournisseur</span>
           <select
             value={selectedProfileId}
-            onChange={(event) => setSelectedProfileId(event.target.value)}
+            onChange={(event) => handleProfileChange(event.target.value)}
             disabled={!session || session.profiles.length === 0 || session.isBusy}
           >
             {session?.profiles.map((profile) => (
@@ -359,10 +419,11 @@ export function App() {
           <span>Mode</span>
           <select value={selectedMode} onChange={(event) => setSelectedMode(event.target.value as AppMode)} disabled={session?.isBusy}>
             <option value="chat">discussion</option>
-            <option value="edit">edition</option>
-            <option value="run">execution</option>
-            <option value="agent">agent</option>
+            <option value="edit">edition - texte</option>
+            <option value="run">execution - texte</option>
+            <option value="agent">agent - modifie le workspace</option>
           </select>
+          <p className="field-hint">Seul le mode agent modifie les fichiers pour l'instant. Les autres modes repondent en texte.</p>
         </label>
 
         <label className="field field-wide">
@@ -372,6 +433,43 @@ export function App() {
             value={modelInput}
             onChange={(event) => setModelInput(event.target.value)}
             placeholder={activeProfile?.model ?? 'Choisir un modele'}
+            disabled={session?.isBusy}
+          />
+        </label>
+
+        <div className="field field-wide">
+          <span>Temperature</span>
+          <div className="temperature-row">
+            <input
+              type="range"
+              min={0}
+              max={2}
+              step={0.05}
+              value={Number.isFinite(Number(temperatureInput)) ? Number(temperatureInput) : 1}
+              onChange={(event) => setTemperatureInput(event.target.value)}
+              disabled={session?.isBusy}
+            />
+            <input
+              className="temperature-input"
+              type="number"
+              min={0}
+              max={2}
+              step={0.05}
+              value={temperatureInput}
+              onChange={(event) => setTemperatureInput(event.target.value)}
+              disabled={session?.isBusy}
+            />
+          </div>
+          <p className="field-hint">0 = deterministe, 2 = creatif. Valeur appliquee au prochain run.</p>
+        </div>
+
+        <label className="field field-wide">
+          <span>System prompt (optionnel)</span>
+          <textarea
+            rows={4}
+            value={systemPromptInput}
+            onChange={(event) => setSystemPromptInput(event.target.value)}
+            placeholder="Ajoute des instructions de haut niveau appliquees a toutes les discussions."
             disabled={session?.isBusy}
           />
         </label>
@@ -740,6 +838,28 @@ export function App() {
         </section>
       </section>
 
+      {queuedPrompts.length ? (
+        <section className="queue-box">
+          <div className="panel-head">
+            <div>
+              <strong>File d'attente</strong>
+              <p className="muted">{formatQueuedPromptCount(queuedPrompts.length)}</p>
+            </div>
+          </div>
+          <div className="queued-prompt-list">
+            {queuedPrompts.map((prompt, index) => (
+              <article key={prompt.id} className="queued-prompt">
+                <div className="bubble-meta">
+                  <span>#{index + 1}</span>
+                  <span>{formatModeLabel(prompt.mode)}</span>
+                </div>
+                <p>{prompt.textPreview}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <main className="transcript">
         {session?.messages.length ? (
           session.messages.map((message) => (
@@ -763,9 +883,9 @@ export function App() {
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Demande au modele d'analyser du code, d'expliquer un fichier ou de preparer la suite."
+          placeholder={getComposerPlaceholder(selectedMode)}
           rows={5}
-          disabled={session?.isBusy}
+          disabled={!session}
         />
         <div className="composer-actions">
           <button type="button" className="secondary" onClick={handleStopChat} disabled={!session?.isBusy}>
@@ -779,6 +899,16 @@ export function App() {
     </div>
   );
 }
+
+type SessionStatePayload = Extract<HostMessage, { type: 'host.session.state' }>['payload'];
+
+type AssistantActivityTone = 'idle' | 'running' | 'success' | 'warning' | 'error';
+
+type AssistantActivity = {
+  tone: AssistantActivityTone;
+  label: string;
+  detail: string;
+};
 
 function createMessage<TType extends UiMessage['type']>(
   type: TType,
@@ -856,6 +986,8 @@ function formatAgentStatus(status: string): string {
       return 'en cours';
     case 'paused':
       return 'en pause';
+    case 'waiting_for_user':
+      return 'en attente';
     case 'completed':
       return 'termine';
     case 'failed':
@@ -906,8 +1038,27 @@ function formatGpuAction(action: string | undefined): string {
   }
 }
 
+function formatQueuedPromptCount(count: number): string {
+  return `${count} prompt${count > 1 ? 's' : ''} en attente`;
+}
+
+function formatModeLabel(mode: AppMode): string {
+  switch (mode) {
+    case 'chat':
+      return 'discussion';
+    case 'edit':
+      return 'edition';
+    case 'run':
+      return 'execution';
+    case 'agent':
+      return 'agent';
+    default:
+      return mode;
+  }
+}
+
 function updateAssistantStream(
-  current: Extract<HostMessage, { type: 'host.session.state' }>['payload'] | null,
+  current: SessionStatePayload | null,
   runId: string,
   textDelta: string
 ) {
@@ -938,7 +1089,7 @@ function updateAssistantStream(
 }
 
 function upsertCommandRecord(
-  current: Extract<HostMessage, { type: 'host.session.state' }>['payload'] | null,
+  current: SessionStatePayload | null,
   record: CommandRunRecord,
   clearApproval = false
 ) {
@@ -962,7 +1113,7 @@ function upsertCommandRecord(
 }
 
 function appendCommandStream(
-  current: Extract<HostMessage, { type: 'host.session.state' }>['payload'] | null,
+  current: SessionStatePayload | null,
   runId: string,
   stream: 'stdout' | 'stderr',
   textDelta: string
@@ -984,4 +1135,137 @@ function appendCommandStream(
     ...current,
     commandHistory
   };
+}
+
+function deriveAssistantActivityFromSession(
+  session: SessionStatePayload,
+  current: AssistantActivity
+): AssistantActivity {
+  if (session.currentAgentRun) {
+    return createAssistantActivityFromAgentRun(session.currentAgentRun);
+  }
+
+  if (session.isBusy) {
+    return {
+      tone: 'running',
+      label: 'IA en cours',
+      detail: 'Generation de la reponse'
+    };
+  }
+
+  const lastAssistantMessage = [...session.messages].reverse().find((message) => message.role === 'assistant');
+  if (lastAssistantMessage?.status === 'error') {
+    return {
+      tone: 'error',
+      label: 'IA en erreur',
+      detail: 'La derniere execution a echoue'
+    };
+  }
+
+  if (lastAssistantMessage?.status === 'complete') {
+    if (current.tone === 'idle' || current.tone === 'running') {
+      return {
+        tone: 'success',
+        label: 'IA terminee',
+        detail: 'La derniere reponse est disponible'
+      };
+    }
+
+    return current;
+  }
+
+  return current;
+}
+
+function createAssistantActivityFromRunStatus(
+  status: 'running' | 'completed' | 'failed' | 'cancelled',
+  stopReason?: string
+): AssistantActivity {
+  switch (status) {
+    case 'running':
+      return {
+        tone: 'running',
+        label: 'IA en cours',
+        detail: 'Generation de la reponse'
+      };
+    case 'completed':
+      return {
+        tone: 'success',
+        label: 'IA terminee',
+        detail: 'La reponse est complete'
+      };
+    case 'failed':
+      return {
+        tone: 'error',
+        label: 'IA en erreur',
+        detail: stopReason ? formatStopReason(stopReason) : 'Erreur du fournisseur'
+      };
+    case 'cancelled':
+      return {
+        tone: 'warning',
+        label: 'IA arretee',
+        detail: stopReason ? formatStopReason(stopReason) : 'Execution interrompue'
+      };
+    default:
+      return DEFAULT_ASSISTANT_ACTIVITY;
+  }
+}
+
+function createAssistantActivityFromAgentRun(run: SessionStatePayload['currentAgentRun']): AssistantActivity {
+  if (!run) {
+    return DEFAULT_ASSISTANT_ACTIVITY;
+  }
+
+  switch (run.status) {
+    case 'running':
+      return {
+        tone: 'running',
+        label: 'IA en cours',
+        detail: `Iteration ${run.iteration + 1} sur ${run.maxIterations}`
+      };
+    case 'paused':
+      return {
+        tone: 'warning',
+        label: 'IA en pause',
+        detail: 'Execution mise en pause'
+      };
+    case 'waiting_for_user':
+      return {
+        tone: 'warning',
+        label: 'IA en attente',
+        detail: 'Une approbation utilisateur est requise'
+      };
+    case 'completed':
+      return {
+        tone: 'success',
+        label: 'IA terminee',
+        detail: run.summary?.trim() || 'Le travail est termine'
+      };
+    case 'failed':
+      return {
+        tone: 'error',
+        label: 'IA en erreur',
+        detail: run.stopReason?.trim() || 'L execution agent a echoue'
+      };
+    case 'cancelled':
+      return {
+        tone: 'warning',
+        label: 'IA arretee',
+        detail: run.stopReason?.trim() || 'Execution interrompue'
+      };
+    default:
+      return DEFAULT_ASSISTANT_ACTIVITY;
+  }
+}
+
+function getComposerPlaceholder(mode: AppMode): string {
+  switch (mode) {
+    case 'agent':
+      return 'Decris une modification concrete a appliquer dans le workspace, puis laisse l agent travailler.';
+    case 'edit':
+    case 'run':
+      return 'Ce mode reste textuel pour l instant. Utilise le mode agent si tu veux modifier des fichiers.';
+    default:
+      return "Demande au modele d'analyser du code, d'expliquer un fichier ou de preparer la suite.";
+  }
 }

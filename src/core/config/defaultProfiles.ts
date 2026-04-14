@@ -2,7 +2,7 @@ import type { ProvidersConfig } from '../types';
 
 export const defaultProvidersConfig: ProvidersConfig = {
   version: 1,
-  activeProfileId: 'ollama-local',
+  activeProfileId: 'ollama-gemma4-26b-local',
   profiles: [
     {
       id: 'ollama-local',
@@ -10,6 +10,22 @@ export const defaultProvidersConfig: ProvidersConfig = {
       providerType: 'ollama',
       baseUrl: 'http://localhost:11434',
       model: 'devstral-small-2:latest',
+      temperature: 1,
+      maxOutputTokens: 8192,
+      capabilities: {
+        streaming: true,
+        toolCalling: true,
+        jsonMode: false,
+        vision: true,
+        reasoningEffort: false
+      }
+    },
+    {
+      id: 'ollama-gemma4-26b-local',
+      label: 'Ollama Gemma 4 26B',
+      providerType: 'ollama',
+      baseUrl: 'http://localhost:11434',
+      model: 'gemma4:26b',
       temperature: 1,
       maxOutputTokens: 8192,
       capabilities: {

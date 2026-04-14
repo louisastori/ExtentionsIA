@@ -5,6 +5,7 @@ import { AgentOrchestrator, type AgentRunHandle } from '../core/agent/agentOrche
 import { buildSystemPrompt } from '../core/chat/systemPrompt';
 import { ConfigurationService } from '../core/config/configurationService';
 import {
+  createId,
   createHostMessage,
   isUiAgentControlMessage,
   isUiAgentToolApprovalMessage,
@@ -35,9 +36,20 @@ import type {
   CommandRunRecord,
   GpuGuardPolicy,
   GpuGuardSnapshot,
+  QueuedPromptPreview,
   ResolvedProviderProfile,
   RunStatusPayload
 } from '../core/types';
+
+type QueuedPromptSubmission = {
+  id: string;
+  requestId: string;
+  text: string;
+  mode: AppMode;
+  profileId?: string;
+  model?: string;
+  createdAt: string;
+};
 
 export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'esctentionialocal.sidebar';
@@ -51,7 +63,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private currentGpuGuardState: GpuGuardSnapshot;
   private gpuMonitorTimer?: NodeJS.Timeout;
   private lastGpuGuardEnforcementKey?: string;
+  private readonly queuedPromptSubmissions: QueuedPromptSubmission[] = [];
   private readonly pendingAgentApprovalResolvers = new Map<string, (decision: 'approved' | 'rejected') => void>();
+  private isProcessingPromptQueue = false;
 
   public constructor(
     private readonly extensionUri: vscode.Uri,
@@ -194,6 +208,27 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
+    const shouldQueueSubmission =
+      !this.isProcessingPromptQueue &&
+      (this.sessionStore.getBusyRunId() !== undefined ||
+        this.queuedPromptSubmissions.length > 0 ||
+        this.getGpuGuardStartBlockMessage() !== undefined);
+
+    if (shouldQueueSubmission) {
+      this.queuedPromptSubmissions.push({
+        id: createId('queued-prompt'),
+        requestId: message.requestId,
+        text: rawText,
+        mode: message.payload.mode,
+        profileId: message.payload.profileId,
+        model: message.payload.model?.trim() || undefined,
+        createdAt: new Date().toISOString()
+      });
+      await this.postSessionState(message.requestId);
+      void this.processQueuedPromptSubmissions();
+      return;
+    }
+
     if (this.sessionStore.getBusyRunId()) {
       this.postMessage(
         createHostMessage(
@@ -269,7 +304,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       const stream = await this.providerRegistry.createChatCompletion({
         profileId: selectedProfile.id,
         model: selectedModel,
-        messages: this.sessionStore.buildConversation(buildSystemPrompt(message.payload.mode)),
+        messages: this.sessionStore.buildConversation(
+          buildSystemPrompt(message.payload.mode, this.configurationService.getSystemPromptOverride())
+        ),
         signal: this.currentAbortController.signal
       });
 
@@ -325,11 +362,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     } finally {
       this.currentAbortController = undefined;
       await this.postSessionState(message.requestId);
+      void this.processQueuedPromptSubmissions();
     }
   }
 
   private async postSessionState(requestId?: string): Promise<void> {
     const profiles = await this.providerRegistry.getResolvedProfiles();
+    const defaultTemperature = this.configurationService.getDefaultTemperature();
+    const systemPrompt = this.configurationService.getSystemPromptOverride();
     this.postMessage(
       createHostMessage(
         'host.session.state',
@@ -338,11 +378,47 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           this.workspaceService.getWorkspaceFolders(),
           this.configurationService.getTerminalPolicy(),
           this.currentGpuGuardState,
-          this.currentAgentRun
+          defaultTemperature,
+          systemPrompt,
+          this.currentAgentRun,
+          this.queuedPromptSubmissions.map((submission) => createQueuedPromptPreview(submission))
         ),
         requestId
       )
     );
+  }
+
+  private async processQueuedPromptSubmissions(): Promise<void> {
+    if (this.isProcessingPromptQueue || this.sessionStore.getBusyRunId()) {
+      return;
+    }
+
+    if (this.getGpuGuardStartBlockMessage()) {
+      return;
+    }
+
+    const nextSubmission = this.queuedPromptSubmissions.shift();
+    if (!nextSubmission) {
+      return;
+    }
+
+    this.isProcessingPromptQueue = true;
+    try {
+      await this.handleChatSubmit({
+        requestId: nextSubmission.requestId,
+        payload: {
+          text: nextSubmission.text,
+          mode: nextSubmission.mode,
+          profileId: nextSubmission.profileId,
+          model: nextSubmission.model
+        }
+      });
+    } finally {
+      this.isProcessingPromptQueue = false;
+      if (!this.sessionStore.getBusyRunId() && !this.getGpuGuardStartBlockMessage() && this.queuedPromptSubmissions.length > 0) {
+        void this.processQueuedPromptSubmissions();
+      }
+    }
   }
 
   private postRunStatus(status: RunStatusPayload, requestId?: string): void {
@@ -370,6 +446,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       model?: string;
       autoApproveWorkspaceEdits?: boolean;
       autoApproveTerminal?: boolean;
+      temperature?: number;
+      systemPrompt?: string;
     }
   ): Promise<void> {
     try {
@@ -386,7 +464,9 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         mode: payload.mode,
         model: selectedModel,
         autoApproveWorkspaceEdits: payload.autoApproveWorkspaceEdits,
-        autoApproveTerminal: payload.autoApproveTerminal
+        autoApproveTerminal: payload.autoApproveTerminal,
+        temperature: payload.temperature,
+        systemPrompt: payload.systemPrompt
       });
 
       this.sessionStore.hydrateSelection(payload.mode, selectedProfile.id, selectedModel);
@@ -517,6 +597,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           this.currentAgentToolApproval = undefined;
           this.sessionStore.clearPendingAgentToolApproval();
           void this.postSessionState(requestId);
+          void this.processQueuedPromptSubmissions();
         }
       },
       onApprovalRequired: async (approval, snapshot) => {
@@ -766,6 +847,10 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     if (didGpuGuardStateChange(previous, next)) {
       await this.postSessionState(requestId);
     }
+
+    if (!next.limitExceeded) {
+      void this.processQueuedPromptSubmissions();
+    }
   }
 
   private async applyGpuGuardEnforcement(current: GpuGuardSnapshot, requestId?: string): Promise<void> {
@@ -910,6 +995,16 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       'http://localhost:11434'
     );
   }
+}
+
+function createQueuedPromptPreview(submission: QueuedPromptSubmission): QueuedPromptPreview {
+  const normalizedText = submission.text.replace(/\s+/g, ' ').trim();
+  return {
+    id: submission.id,
+    mode: submission.mode,
+    textPreview: normalizedText.length > 180 ? `${normalizedText.slice(0, 177)}...` : normalizedText,
+    createdAt: submission.createdAt
+  };
 }
 
 function resolveProfile(
