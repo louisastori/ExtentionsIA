@@ -1,0 +1,267 @@
+version: 1
+catalog:
+  - name: list_workspace
+    phase: edit
+    risk_level: low
+    approval_policy: auto
+    description: Liste les racines du workspace et un aperçu borné des chemins disponibles.
+    input_schema:
+      type: object
+      properties:
+        maxEntries:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 200
+      additionalProperties: false
+
+  - name: list_directory
+    phase: edit
+    risk_level: low
+    approval_policy: auto
+    description: Liste les entrées directes d'un dossier du workspace.
+    input_schema:
+      type: object
+      required: [absolutePath]
+      properties:
+        absolutePath:
+          type: string
+        recursive:
+          type: boolean
+          default: false
+        maxDepth:
+          type: integer
+          minimum: 1
+          maximum: 8
+        maxEntries:
+          type: integer
+          minimum: 1
+          maximum: 2000
+          default: 200
+      additionalProperties: false
+
+  - name: search_workspace
+    phase: edit
+    risk_level: low
+    approval_policy: auto
+    description: Recherche un motif texte dans le workspace.
+    input_schema:
+      type: object
+      required: [pattern]
+      properties:
+        pattern:
+          type: string
+        isRegex:
+          type: boolean
+          default: false
+        caseSensitive:
+          type: boolean
+          default: false
+        includeGlobs:
+          type: array
+          items:
+            type: string
+        excludeGlobs:
+          type: array
+          items:
+            type: string
+        maxResults:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          default: 100
+      additionalProperties: false
+
+  - name: read_file
+    phase: edit
+    risk_level: low
+    approval_policy: auto
+    description: Lit le contenu complet d'un fichier texte.
+    input_schema:
+      type: object
+      required: [absolutePath]
+      properties:
+        absolutePath:
+          type: string
+        encoding:
+          type: string
+          default: utf8
+      additionalProperties: false
+
+  - name: read_file_range
+    phase: edit
+    risk_level: low
+    approval_policy: auto
+    description: Lit un segment borné d'un fichier texte.
+    input_schema:
+      type: object
+      required: [absolutePath, startLine, endLine]
+      properties:
+        absolutePath:
+          type: string
+        startLine:
+          type: integer
+          minimum: 1
+        endLine:
+          type: integer
+          minimum: 1
+        includeLineNumbers:
+          type: boolean
+          default: true
+      additionalProperties: false
+
+  - name: apply_patch
+    phase: edit
+    risk_level: medium
+    approval_policy: user
+    description: Remplace un bloc exact dans un fichier et retourne un diff aperçu.
+    input_schema:
+      type: object
+      required: [absolutePath, searchBlock, replaceBlock]
+      properties:
+        absolutePath:
+          type: string
+        searchBlock:
+          type: string
+        replaceBlock:
+          type: string
+        occurrence:
+          type: integer
+          minimum: 1
+        createIfMissing:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+  - name: create_file
+    phase: edit
+    risk_level: medium
+    approval_policy: user
+    description: Crée un fichier texte si le chemin cible est autorisé.
+    input_schema:
+      type: object
+      required: [absolutePath, content]
+      properties:
+        absolutePath:
+          type: string
+        content:
+          type: string
+        overwrite:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+  - name: rename_path
+    phase: edit
+    risk_level: medium
+    approval_policy: user
+    description: Renomme ou déplace un fichier/dossier dans le workspace autorisé.
+    input_schema:
+      type: object
+      required: [fromAbsolutePath, toAbsolutePath]
+      properties:
+        fromAbsolutePath:
+          type: string
+        toAbsolutePath:
+          type: string
+        overwrite:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+  - name: delete_path
+    phase: edit
+    risk_level: high
+    approval_policy: user
+    description: Supprime un chemin. Désactivé par défaut en v1.
+    enabled_by_default: false
+    input_schema:
+      type: object
+      required: [absolutePath]
+      properties:
+        absolutePath:
+          type: string
+        recursive:
+          type: boolean
+          default: false
+      additionalProperties: false
+
+  - name: execute_terminal_command
+    phase: run
+    risk_level: high
+    approval_policy: user
+    description: Exécute une commande shell contrôlée et capture le résultat.
+    input_schema:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+        cwd:
+          type: string
+        timeoutMs:
+          type: integer
+          minimum: 1000
+          maximum: 3600000
+          default: 120000
+        shell:
+          type: string
+        env:
+          type: object
+          additionalProperties:
+            type: string
+        waitForExit:
+          type: boolean
+          default: true
+      additionalProperties: false
+
+  - name: read_command_output
+    phase: run
+    risk_level: low
+    approval_policy: auto
+    description: Lit la sortie d'une commande précédemment exécutée.
+    input_schema:
+      type: object
+      required: [commandRunId]
+      properties:
+        commandRunId:
+          type: string
+        maxCharacters:
+          type: integer
+          minimum: 100
+          maximum: 50000
+          default: 8000
+      additionalProperties: false
+
+  - name: ask_user
+    phase: agent
+    risk_level: low
+    approval_policy: auto
+    description: Met en pause l'agent et demande une information complémentaire à l'utilisateur.
+    input_schema:
+      type: object
+      required: [question]
+      properties:
+        question:
+          type: string
+      additionalProperties: false
+
+  - name: complete_task
+    phase: agent
+    risk_level: low
+    approval_policy: auto
+    description: Marque la tâche comme terminée et fournit un résumé final.
+    input_schema:
+      type: object
+      required: [summary]
+      properties:
+        summary:
+          type: string
+        changedFiles:
+          type: array
+          items:
+            type: string
+        testSummary:
+          type: string
+      additionalProperties: false
+

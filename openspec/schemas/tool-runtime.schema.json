@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://esctentionialocal.dev/schemas/tool-runtime.schema.json",
+  "title": "esctentionIALocal Tool Runtime",
+  "type": "object",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/toolCatalog"
+    },
+    {
+      "$ref": "#/$defs/toolCall"
+    },
+    {
+      "$ref": "#/$defs/toolResult"
+    }
+  ],
+  "$defs": {
+    "toolCatalog": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "tools"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/toolDefinition"
+          }
+        }
+      }
+    },
+    "toolDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "phase",
+        "description",
+        "riskLevel",
+        "approvalPolicy",
+        "inputSchema"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]+$"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "edit",
+            "run",
+            "agent"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "riskLevel": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "approvalPolicy": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "user",
+            "policy"
+          ]
+        },
+        "enabledByDefault": {
+          "type": "boolean",
+          "default": true
+        },
+        "inputSchema": {
+          "type": "object"
+        },
+        "outputSchema": {
+          "type": "object"
+        }
+      }
+    },
+    "toolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "name",
+        "arguments"
+      ],
+      "properties": {
+        "kind": {
+          "const": "tool_call"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "providerCallId": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string",
+          "enum": [
+            "assistant",
+            "system",
+            "user_override"
+          ]
+        }
+      }
+    },
+    "toolResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "toolCallId",
+        "toolName",
+        "success",
+        "content"
+      ],
+      "properties": {
+        "kind": {
+          "const": "tool_result"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "content": {
+          "type": "string"
+        },
+        "structuredContent": {
+          "type": "object"
+        },
+        "isTruncated": {
+          "type": "boolean"
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifact"
+          }
+        },
+        "error": {
+          "$ref": "#/$defs/toolError"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "label"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "diff",
+            "file",
+            "terminal_output",
+            "json"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "value": {}
+      }
+    },
+    "toolError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_arguments",
+            "approval_required",
+            "permission_denied",
+            "not_found",
+            "conflict",
+            "timeout",
+            "execution_failed"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

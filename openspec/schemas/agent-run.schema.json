@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://esctentionialocal.dev/schemas/agent-run.schema.json",
+  "title": "esctentionIALocal Agent Run",
+  "type": "object",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/agentRunRequest"
+    },
+    {
+      "$ref": "#/$defs/runStatusEvent"
+    }
+  ],
+  "$defs": {
+    "agentRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "goal",
+        "mode",
+        "profileId",
+        "loopPolicy"
+      ],
+      "properties": {
+        "goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "edit",
+            "run",
+            "agent"
+          ]
+        },
+        "profileId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string"
+        },
+        "loopPolicy": {
+          "$ref": "#/$defs/loopPolicy"
+        },
+        "approvalPolicy": {
+          "$ref": "#/$defs/approvalPolicy"
+        },
+        "contextPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "loopPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "maxIterations",
+        "maxToolCalls",
+        "timeBudgetMs"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "single_turn",
+            "step",
+            "bounded_auto",
+            "until_goal_or_limits"
+          ]
+        },
+        "maxIterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        },
+        "timeBudgetMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 3600000
+        },
+        "maxConsecutiveFailures": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 3
+        },
+        "continueOnRecoverableError": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "approvalPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "autoApproveReadOnlyTools": {
+          "type": "boolean"
+        },
+        "autoApproveWorkspaceEdits": {
+          "type": "boolean"
+        },
+        "autoApproveTerminal": {
+          "type": "boolean"
+        },
+        "commandAllowList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commandDenyList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "runStatusEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "status",
+        "iteration",
+        "toolCallsUsed"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "running",
+            "waiting_for_approval",
+            "waiting_for_user",
+            "paused",
+            "completed",
+            "failed",
+            "cancelled",
+            "stopped"
+          ]
+        },
+        "iteration": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toolCallsUsed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stopReason": {
+          "type": "string",
+          "enum": [
+            "completed",
+            "cancelled_by_user",
+            "time_budget_exceeded",
+            "iteration_budget_exceeded",
+            "tool_budget_exceeded",
+            "too_many_failures",
+            "user_input_required",
+            "policy_violation",
+            "assistant_returned_without_completion",
+            "fatal_error"
+          ]
+        },
+        "summary": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

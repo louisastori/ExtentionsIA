@@ -1,0 +1,236 @@
+{
+  "name": "esctentionialocal",
+  "displayName": "esctentionIALocal",
+  "publisher": "local-dev",
+  "description": "Agent IA autonome pour VS Code",
+  "version": "0.0.1",
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "icon": "media/icon.png",
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:esctentionialocal.sidebar",
+    "onCommand:esctentionialocal.startAgent",
+    "onCommand:esctentionialocal.setProviderApiKey"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "esctentionialocal.startAgent",
+        "title": "Ouvrir l'agent esctentionIALocal"
+      },
+      {
+        "command": "esctentionialocal.setProviderApiKey",
+        "title": "Definir la cle API d'un fournisseur"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "esctentionialocal-sidebar-view",
+          "title": "esctentionIALocal",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "esctentionialocal-sidebar-view": [
+        {
+          "type": "webview",
+          "id": "esctentionialocal.sidebar",
+          "name": "Assistant"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "esctentionIALocal",
+      "properties": {
+        "esctentionialocal.defaultProfileId": {
+          "type": "string",
+          "default": "ollama-local",
+          "description": "Profil fournisseur utilise par defaut."
+        },
+        "esctentionialocal.defaultMode": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "edit",
+            "run",
+            "agent"
+          ],
+          "default": "chat",
+          "description": "Mode d'execution par defaut de l'extension."
+        },
+        "esctentionialocal.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Modele utilise par defaut pour les nouvelles executions."
+        },
+        "esctentionialocal.localOnlyMode": {
+          "type": "boolean",
+          "default": true,
+          "description": "Masque les profils cloud et force uniquement des fournisseurs locaux sans cle API."
+        },
+        "esctentionialocal.providers": {
+          "type": "object",
+          "default": {},
+          "description": "Configuration des profils fournisseurs et modeles."
+        },
+        "esctentionialocal.agent.maxIterations": {
+          "type": "number",
+          "default": 12,
+          "minimum": 1,
+          "description": "Nombre maximum d'iterations agentiques."
+        },
+        "esctentionialocal.agent.maxToolCalls": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Nombre maximum d'appels d'outils."
+        },
+        "esctentionialocal.agent.timeBudgetMs": {
+          "type": "number",
+          "default": 600000,
+          "minimum": 1000,
+          "description": "Budget temps maximum pour une execution agentique."
+        },
+        "esctentionialocal.agent.maxConsecutiveFailures": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Nombre maximum d'echecs consecutifs avant arret de l'agent."
+        },
+        "esctentionialocal.agent.autoApproveReadOnlyTools": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-approuver les outils en lecture seule."
+        },
+        "esctentionialocal.agent.autoApproveWorkspaceEdits": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-approuver les modifications du workspace."
+        },
+        "esctentionialocal.agent.autoApproveTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-approuver les commandes terminal."
+        },
+        "esctentionialocal.agent.commandAllowList": {
+          "type": "array",
+          "default": [
+            "npm test",
+            "npm run test",
+            "npm run lint",
+            "npm run build",
+            "pnpm test",
+            "pnpm lint",
+            "pnpm build"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Liste exacte des commandes terminal auto-autorisables."
+        },
+        "esctentionialocal.agent.commandDenyList": {
+          "type": "array",
+          "default": [
+            "rm -rf /",
+            "git reset --hard",
+            "del /s /q"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "Liste exacte des commandes terminal bloquees."
+        },
+        "esctentionialocal.gpuGuard.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Active la surveillance GPU pour les executions de modeles locaux."
+        },
+        "esctentionialocal.gpuGuard.provider": {
+          "type": "string",
+          "enum": [
+            "off",
+            "auto",
+            "nvidia-smi"
+          ],
+          "default": "auto",
+          "description": "Fournisseur de telemetrie GPU utilise par la surveillance."
+        },
+        "esctentionialocal.gpuGuard.maxTemperatureC": {
+          "type": "number",
+          "default": 80,
+          "minimum": 1,
+          "maximum": 120,
+          "description": "Temperature GPU maximale en Celsius avant reaction de la surveillance."
+        },
+        "esctentionialocal.gpuGuard.maxUtilizationPercent": {
+          "type": "number",
+          "default": 90,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Pourcentage maximal d'utilisation GPU avant reaction de la surveillance."
+        },
+        "esctentionialocal.gpuGuard.pollIntervalMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 1000,
+          "description": "Intervalle de releve pour la telemetrie GPU."
+        },
+        "esctentionialocal.gpuGuard.action": {
+          "type": "string",
+          "enum": [
+            "warn",
+            "pause",
+            "stop"
+          ],
+          "default": "pause",
+          "description": "Action a appliquer quand un seuil de surveillance GPU est depasse."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ && vite build",
+    "watch": "npm-run-all -p watch:extension watch:webview",
+    "watch:extension": "tsc -watch -p ./",
+    "watch:webview": "vite build --watch",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src webview-ui/src --ext ts,tsx",
+    "test:ollama-smoke": "node ./scripts/ollama-smoke-test.mjs",
+    "test:unit": "node ./out/test/runTest.js",
+    "test:integration": "npx vscode-test --label integration",
+    "test:integration:live-agent": "npx vscode-test --label integration-live-agent",
+    "test": "npm run test:unit && npm run test:integration",
+    "package:vsix": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && vsce package --allow-missing-repository --out dist/esctentionIALocal.vsix"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "^20.17.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^5.59.1",
+    "@typescript-eslint/parser": "^5.59.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.2",
+    "eslint": "^8.39.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "npm-run-all": "^4.1.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.0.4",
+    "vite": "^5.4.10"
+  }
+}

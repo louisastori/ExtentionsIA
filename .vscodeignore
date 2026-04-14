@@ -1,0 +1,15 @@
+.eslintrc.cjs
+.vscode-test.js
+.vscode/**
+.vscode-test/**
+node_modules/**
+openspec/**
+src/**
+webview-ui/**
+out/test/**
+out/**/*.map
+media/webview/**/*.map
+package-lock.json
+tsconfig.json
+tsconfig.webview.json
+vite.config.ts

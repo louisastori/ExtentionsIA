@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://esctentionialocal.dev/schemas/provider-config.schema.json",
+  "title": "esctentionIALocal Provider Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "profiles"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "activeProfileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/providerProfile"
+      }
+    }
+  },
+  "$defs": {
+    "providerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "providerType",
+        "model"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9._-]+$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerType": {
+          "type": "string",
+          "enum": [
+            "openai",
+            "anthropic",
+            "google",
+            "ollama",
+            "openai-compatible"
+          ]
+        },
+        "baseUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "apiKeySecretRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fallbackModel": {
+          "type": "string",
+          "minLength": 1
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "topP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "systemPromptPreset": {
+          "type": "string"
+        },
+        "customHeaders": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9-]+$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "capabilities": {
+          "$ref": "#/$defs/capabilities"
+        },
+        "safetyDefaults": {
+          "$ref": "#/$defs/safetyDefaults"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "providerType": {
+                "enum": [
+                  "ollama",
+                  "openai-compatible"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "baseUrl"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "providerType": {
+                "enum": [
+                  "openai",
+                  "anthropic",
+                  "google"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "apiKeySecretRef"
+            ]
+          }
+        }
+      ]
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "streaming": {
+          "type": "boolean"
+        },
+        "toolCalling": {
+          "type": "boolean"
+        },
+        "jsonMode": {
+          "type": "boolean"
+        },
+        "vision": {
+          "type": "boolean"
+        },
+        "reasoningEffort": {
+          "type": "boolean"
+        },
+        "parallelToolCalls": {
+          "type": "boolean"
+        }
+      }
+    },
+    "safetyDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "autoApproveReadOnlyTools": {
+          "type": "boolean"
+        },
+        "autoApproveWorkspaceEdits": {
+          "type": "boolean"
+        },
+        "autoApproveTerminal": {
+          "type": "boolean"
+        },
+        "commandAllowList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "commandDenyList": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
