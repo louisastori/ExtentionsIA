@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
-import type { CommandRunRecord, PersistedSessionState, TaskHistoryEntry, TranscriptMessage } from '../types';
+import type {
+  CommandRunRecord,
+  PersistedSessionState,
+  ProjectMemorySnapshot,
+  TaskHistoryEntry,
+  TranscriptMessage
+} from '../types';
 
 const STORAGE_KEY = 'esctentionialocal.session.v1';
 
@@ -36,7 +42,8 @@ function isPersistedSessionState(value: unknown): value is PersistedSessionState
     Array.isArray(value.commandHistory) &&
     value.commandHistory.every(isCommandRunRecord) &&
     Array.isArray(value.taskHistory) &&
-    value.taskHistory.every(isTaskHistoryEntry)
+    value.taskHistory.every(isTaskHistoryEntry) &&
+    (value.projectMemory === undefined || isProjectMemorySnapshot(value.projectMemory))
   );
 }
 
@@ -102,6 +109,27 @@ function isTaskHistoryEntry(value: unknown): value is TaskHistoryEntry {
       value.status === 'completed' ||
       value.status === 'failed' ||
       value.status === 'cancelled')
+  );
+}
+
+function isProjectMemorySnapshot(value: unknown): value is ProjectMemorySnapshot {
+  if (!isObject(value)) {
+    return false;
+  }
+
+  return (
+    typeof value.fingerprint === 'string' &&
+    typeof value.displayName === 'string' &&
+    Array.isArray(value.workspaceFolders) &&
+    value.workspaceFolders.every((entry) => typeof entry === 'string') &&
+    (value.description === undefined || typeof value.description === 'string') &&
+    Array.isArray(value.techStack) &&
+    value.techStack.every((entry) => typeof entry === 'string') &&
+    Array.isArray(value.packageScripts) &&
+    value.packageScripts.every((entry) => typeof entry === 'string') &&
+    Array.isArray(value.importantFiles) &&
+    value.importantFiles.every((entry) => typeof entry === 'string') &&
+    typeof value.updatedAt === 'string'
   );
 }
 

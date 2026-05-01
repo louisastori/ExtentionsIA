@@ -134,6 +134,56 @@ textarea {
   color: var(--vscode-descriptionForeground);
 }
 
+.fold-panel {
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 92%, transparent);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.fold-panel.fold-panel-secondary {
+  background: color-mix(in srgb, var(--vscode-editorWidget-background) 88%, transparent);
+}
+
+.fold-panel.fold-panel-inline {
+  background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
+  border-radius: 12px;
+}
+
+.fold-summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold-summary p {
+  margin: 4px 0 0;
+}
+
+.fold-content {
+  display: grid;
+  gap: 12px;
+  padding: 0 12px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--vscode-panel-border) 45%, transparent);
+}
+
+.fold-chevron {
+  color: var(--vscode-descriptionForeground);
+  transition: transform 160ms ease;
+}
+
+.fold-panel[open] .fold-chevron {
+  transform: rotate(180deg);
+}
+
 .control-grid,
 .tool-grid,
 .control-grid {
@@ -209,6 +259,7 @@ textarea {
 
 .provider-card,
 .gpu-guard-card,
+.active-editor-card,
 .workspace-roots,
 .agent-box,
 .queue-box,
@@ -223,6 +274,7 @@ textarea {
 
 .provider-card,
 .gpu-guard-card,
+.active-editor-card,
 .workspace-roots,
 .agent-box,
 .queue-box,
@@ -256,14 +308,62 @@ textarea {
 .memory-box,
 .gpu-guard-form,
 .gpu-device-list,
-.gpu-guard-meta {
+.gpu-guard-meta,
+.active-editor-body,
+.active-editor-meta,
+.meta-chip-row {
   display: grid;
   gap: 10px;
+}
+
+.meta-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
+  background: color-mix(in srgb, var(--vscode-editor-background) 76%, transparent);
+  color: var(--vscode-foreground);
+  font-size: 12px;
 }
 
 .queued-prompt-list {
   display: grid;
   gap: 8px;
+}
+
+.active-editor-selection,
+.active-editor-excerpt {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
+  background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
+  padding: 10px;
+}
+
+.active-editor-meta p,
+.active-editor-selection p,
+.active-editor-excerpt p {
+  margin: 0;
+}
+
+.active-editor-selection pre,
+.active-editor-excerpt pre {
+  margin: 8px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, black 18%, var(--vscode-editor-background));
+  font-family: var(--vscode-editor-font-family, var(--vscode-font-family));
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .memory-list {
@@ -283,6 +383,15 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--vscode-panel-border) 60%, transparent);
   background: color-mix(in srgb, var(--vscode-editor-background) 72%, transparent);
   padding: 10px;
+}
+
+.project-memory-card {
+  border-color: color-mix(in srgb, var(--vscode-button-background) 38%, var(--vscode-panel-border));
+}
+
+.project-memory-card .muted,
+.project-memory-card .history-summary {
+  margin: 6px 0 0;
 }
 
 .history-card.completed {

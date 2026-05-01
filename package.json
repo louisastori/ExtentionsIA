@@ -63,7 +63,7 @@
             "run",
             "agent"
           ],
-          "default": "chat",
+          "default": "agent",
           "description": "Mode d'execution par defaut de l'extension."
         },
         "esctentionialocal.defaultModel": {

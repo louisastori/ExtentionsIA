@@ -47,6 +47,7 @@ export class AgentOrchestrator {
     model?: string;
     goal: string;
     memoryContext?: string;
+    activeEditorContext?: string;
     policy: AgentLoopPolicy;
     signal?: AbortSignal;
     onStatus: (snapshot: AgentRunSnapshot) => void;
@@ -98,7 +99,7 @@ export class AgentOrchestrator {
     const messages: CanonicalAgentMessage[] = [
       {
         role: 'system',
-        content: buildAgentSystemPrompt(input.policy, input.memoryContext)
+        content: buildAgentSystemPrompt(input.policy, input.memoryContext, input.activeEditorContext)
       },
       {
         role: 'user',
@@ -255,7 +256,11 @@ function ensureBudgets(
   }
 }
 
-function buildAgentSystemPrompt(policy: AgentLoopPolicy, memoryContext?: string): string {
+function buildAgentSystemPrompt(
+  policy: AgentLoopPolicy,
+  memoryContext?: string,
+  activeEditorContext?: string
+): string {
   const sections = [
     'Tu es esctentionIALocal en mode agent borne dans VS Code.',
     'Reponds toujours en francais, sauf si l utilisateur demande explicitement une autre langue.',
@@ -274,6 +279,10 @@ function buildAgentSystemPrompt(policy: AgentLoopPolicy, memoryContext?: string)
 
   if (memoryContext) {
     sections.push(memoryContext);
+  }
+
+  if (activeEditorContext) {
+    sections.push(activeEditorContext);
   }
 
   return sections.join(' ');

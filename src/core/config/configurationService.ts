@@ -16,8 +16,8 @@ const EXTENSION_NAMESPACE = 'esctentionialocal';
 
 export class ConfigurationService {
   public getDefaultMode(): AppMode {
-    const mode = this.getConfiguration().get<string>('defaultMode', 'chat');
-    return isAppMode(mode) ? mode : 'chat';
+    const mode = this.getConfiguration().get<string>('defaultMode', 'agent');
+    return isAppMode(mode) ? mode : 'agent';
   }
 
   public getDefaultModel(fallbackModel: string): string {

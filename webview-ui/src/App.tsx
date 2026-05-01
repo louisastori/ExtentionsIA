@@ -26,7 +26,7 @@ export function App() {
   const [session, setSession] = useState<SessionStatePayload | null>(null);
   const [draft, setDraft] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState(initialViewState?.selectedProfileId ?? '');
-  const [selectedMode, setSelectedMode] = useState<AppMode>(initialViewState?.selectedMode ?? 'chat');
+  const [selectedMode, setSelectedMode] = useState<AppMode>(initialViewState?.selectedMode ?? 'agent');
   const [modelInput, setModelInput] = useState(initialViewState?.modelInput ?? '');
   const [autoApproveWorkspaceEdits, setAutoApproveWorkspaceEdits] = useState(false);
   const [autoApproveTerminal, setAutoApproveTerminal] = useState(false);
@@ -43,6 +43,9 @@ export function App() {
   const [gpuPollInterval, setGpuPollInterval] = useState('5000');
   const [temperatureInput, setTemperatureInput] = useState('1');
   const [systemPromptInput, setSystemPromptInput] = useState('');
+  const [advancedPanelOpen, setAdvancedPanelOpen] = useState(initialViewState?.advancedPanelOpen ?? false);
+  const [workspaceToolsOpen, setWorkspaceToolsOpen] = useState(initialViewState?.workspaceToolsOpen ?? false);
+  const [activeEditorDetailsOpen, setActiveEditorDetailsOpen] = useState(initialViewState?.activeEditorDetailsOpen ?? false);
   const [isTemperatureDirty, setIsTemperatureDirty] = useState(false);
   const [isSystemPromptDirty, setIsSystemPromptDirty] = useState(false);
   const hasHydratedSelectionRef = useRef(false);
@@ -78,8 +81,23 @@ export function App() {
   const currentAgentRun = session?.currentAgentRun;
   const pendingAgentToolApproval = session?.pendingAgentToolApproval;
   const queuedPrompts = session?.queuedPrompts ?? [];
+  const activeEditorContext = session?.activeEditorContext;
   const canSaveSelection = Boolean(session && !session.isBusy && activeProfile);
   const canSubmit = draft.trim().length > 0 && Boolean(session && activeProfile);
+  const activeModelLabel = modelInput.trim() || activeProfile?.model || 'modele non defini';
+  const advancedSummary = `${activeProfile?.label ?? 'aucun profil'} | ${formatModeLabel(selectedMode)} | ${activeModelLabel}`;
+  const toolsSummary = formatWorkspaceToolsSummary(
+    session?.commandHistory.length ?? 0,
+    session?.taskHistory.length ?? 0,
+    Boolean(session?.projectMemory),
+    Boolean(session?.pendingCommandApproval),
+    Boolean(runningCommand)
+  );
+  const activeEditorSummary = activeEditorContext
+    ? `${activeEditorContext.languageId} | ${activeEditorContext.isDirty ? 'non sauvegarde' : 'sauvegarde'} | lignes ${
+        activeEditorContext.excerptStartLine
+      }-${activeEditorContext.excerptEndLine}`
+    : "Aucun fichier actif exploitable dans l'editeur";
 
   useEffect(() => {
     if (!session) {
@@ -129,9 +147,18 @@ export function App() {
       sessionId: session?.sessionId ?? previousState?.sessionId,
       selectedProfileId,
       selectedMode,
-      modelInput
+      modelInput,
+      advancedPanelOpen,
+      workspaceToolsOpen,
+      activeEditorDetailsOpen
     });
-  }, [modelInput, selectedMode, selectedProfileId, session?.sessionId]);
+  }, [activeEditorDetailsOpen, advancedPanelOpen, modelInput, selectedMode, selectedProfileId, session?.sessionId, workspaceToolsOpen]);
+
+  useEffect(() => {
+    if (session?.pendingCommandApproval || runningCommand) {
+      setWorkspaceToolsOpen(true);
+    }
+  }, [runningCommand, session?.pendingCommandApproval]);
 
   function handleProfileChange(nextProfileId: string): void {
     setSelectedProfileId(nextProfileId);
@@ -402,7 +429,7 @@ export function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">esctentionIALocal</p>
-          <h1>Agent phase 4</h1>
+          <h1>Agent workspace</h1>
         </div>
         <div className="topbar-status" aria-live="polite">
           <div className={`status-pill ${assistantActivity.tone}`}>
@@ -413,267 +440,360 @@ export function App() {
         </div>
       </header>
 
-      <section className="control-grid">
-        <label className="field">
-          <span>Fournisseur</span>
-          <select
-            value={selectedProfileId}
-            onChange={(event) => handleProfileChange(event.target.value)}
-            disabled={!session || session.profiles.length === 0 || session.isBusy}
-          >
-            {session?.profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Mode</span>
-          <select value={selectedMode} onChange={(event) => setSelectedMode(event.target.value as AppMode)} disabled={session?.isBusy}>
-            <option value="chat">discussion</option>
-            <option value="edit">edition - texte</option>
-            <option value="run">execution - texte</option>
-            <option value="agent">agent - modifie le workspace</option>
-          </select>
-          <p className="field-hint">Seul le mode agent modifie les fichiers pour l'instant. Les autres modes repondent en texte.</p>
-        </label>
-
-        <label className="field field-wide">
-          <span>Modele</span>
-          <input
-            type="text"
-            value={modelInput}
-            onChange={(event) => setModelInput(event.target.value)}
-            placeholder={activeProfile?.model ?? 'Choisir un modele'}
-            disabled={session?.isBusy}
-          />
-        </label>
-
-        <div className="field field-wide">
-          <span>Temperature</span>
-          <div className="temperature-row">
-            <input
-              type="range"
-              min={0}
-              max={2}
-              step={0.05}
-              value={Number.isFinite(Number(temperatureInput)) ? Number(temperatureInput) : 1}
-              onChange={(event) => {
-                setTemperatureInput(event.target.value);
-                setIsTemperatureDirty(true);
-              }}
-              disabled={session?.isBusy}
-            />
-            <input
-              className="temperature-input"
-              type="number"
-              min={0}
-              max={2}
-              step={0.05}
-              value={temperatureInput}
-              onChange={(event) => {
-                setTemperatureInput(event.target.value);
-                setIsTemperatureDirty(true);
-              }}
-              disabled={session?.isBusy}
-            />
-          </div>
-          <p className="field-hint">0 = deterministe, 2 = creatif. Valeur appliquee au prochain run.</p>
-        </div>
-
-        <label className="field field-wide">
-          <span>System prompt (optionnel)</span>
-          <textarea
-            rows={4}
-            value={systemPromptInput}
-            onChange={(event) => {
-              setSystemPromptInput(event.target.value);
-              setIsSystemPromptDirty(true);
-            }}
-            placeholder="Ajoute des instructions de haut niveau appliquees a toutes les discussions."
-            disabled={session?.isBusy}
-          />
-        </label>
-
-        <div className="field field-wide">
-          <span>Approbations</span>
-          <div className="approval-toggles">
-            <label className="toggle-chip">
-              <input
-                type="checkbox"
-                checked={autoApproveWorkspaceEdits}
-                onChange={(event) => setAutoApproveWorkspaceEdits(event.target.checked)}
-                disabled={session?.isBusy}
-              />
-              <span>Fichiers auto-approuves</span>
-            </label>
-
-            <label className="toggle-chip">
-              <input
-                type="checkbox"
-                checked={autoApproveTerminal}
-                onChange={(event) => setAutoApproveTerminal(event.target.checked)}
-                disabled={session?.isBusy}
-              />
-              <span>Terminal auto-approuve</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="field field-wide control-actions">
-          <button type="button" className="secondary action-button" onClick={handleSaveSelection} disabled={!canSaveSelection}>
-            Sauvegarder
-          </button>
-        </div>
-      </section>
-
-      <section className="provider-card">
-        <div>
-          <strong>{activeProfile?.label ?? 'Aucun profil selectionne'}</strong>
-          <p>
-            {activeProfile?.providerType ?? 'n/a'}
-            {activeProfile?.isLocal ? ' | local' : ' | cloud'}
-          </p>
-        </div>
-        <div className="provider-actions">
-          {activeProfile?.providerType === 'ollama' ? (
-            <button type="button" className="secondary action-button" onClick={handleStartOllama}>
-              Demarrer Ollama
-            </button>
-          ) : null}
-          <div className={`secret-state ${activeProfile?.hasApiKey === false && !activeProfile?.isLocal ? 'missing' : ''}`}>
-            {activeProfile?.isLocal ? 'Aucune cle requise' : activeProfile?.hasApiKey ? 'Cle API configuree' : 'Cle API manquante'}
-          </div>
-        </div>
-      </section>
-
-      <section className="gpu-guard-card">
+      <section className="active-editor-card">
         <div className="panel-head">
           <div>
-            <strong>Surveillance GPU</strong>
-            <p className="muted">
-              {formatGpuGuardStatus(session?.gpuGuard.status)} | fournisseur {formatGpuProvider(session?.gpuGuard.provider)} | action{' '}
-              {formatGpuAction(session?.gpuGuard.policy.action)}
-            </p>
+            <strong>Contexte actif</strong>
+            <p className="muted">{activeEditorContext ? activeEditorContext.workspacePath : activeEditorSummary}</p>
           </div>
-          <div className={`status-pill ${session?.gpuGuard.limitExceeded ? 'busy' : ''}`}>
-            {session?.gpuGuard.limitExceeded ? 'Seuil depasse' : 'Dans les limites'}
-          </div>
+          {activeEditorContext ? <span className="section-label">ligne {activeEditorContext.cursorLine}</span> : null}
         </div>
 
-        <form className="gpu-guard-form" onSubmit={handleGpuGuardSave}>
-          <label className="field checkbox-field">
-            <span>Active</span>
-            <input type="checkbox" checked={gpuGuardEnabled} onChange={(event) => setGpuGuardEnabled(event.target.checked)} />
-          </label>
+        {activeEditorContext ? (
+          <div className="active-editor-body">
+            <div className="meta-chip-row">
+              <span className="meta-chip">{activeEditorContext.languageId}</span>
+              <span className="meta-chip">{activeEditorContext.isDirty ? 'non sauvegarde' : 'sauvegarde'}</span>
+              <span className="meta-chip">
+                Curseur {activeEditorContext.cursorLine}:{activeEditorContext.cursorCharacter}
+              </span>
+              <span className="meta-chip">
+                Focus {activeEditorContext.focusStartLine}-{activeEditorContext.focusEndLine}
+              </span>
+              <span className="meta-chip">{activeEditorContext.lineCount} lignes</span>
+            </div>
+            <details
+              className="fold-panel fold-panel-inline"
+              open={activeEditorDetailsOpen}
+              onToggle={(event) => setActiveEditorDetailsOpen((event.currentTarget as HTMLDetailsElement).open)}
+            >
+              <summary className="fold-summary">
+                <div>
+                  <strong>Contexte injecte au modele</strong>
+                  <p className="muted">
+                    {activeEditorSummary}
+                    {activeEditorContext.selection ? ' | selection presente' : ''}
+                  </p>
+                </div>
+                <span className="fold-chevron" aria-hidden="true">
+                  ▾
+                </span>
+              </summary>
 
-          <label className="field">
-            <span>Fournisseur</span>
-            <select value={gpuProvider} onChange={(event) => setGpuProvider(event.target.value as GpuGuardProvider)}>
-              <option value="off">desactive</option>
-              <option value="auto">auto</option>
-              <option value="nvidia-smi">nvidia-smi</option>
-            </select>
-          </label>
+              <div className="fold-content">
+                {activeEditorContext.selection ? (
+                  <div className="active-editor-selection">
+                    <strong>Selection</strong>
+                    <p className="muted">
+                      Lignes {activeEditorContext.selection.startLine}-{activeEditorContext.selection.endLine}, colonnes{' '}
+                      {activeEditorContext.selection.startCharacter}-{activeEditorContext.selection.endCharacter}
+                    </p>
+                    <pre>{activeEditorContext.selection.text || '(selection vide)'}</pre>
+                  </div>
+                ) : null}
 
-          <label className="field">
-            <span>Action</span>
-            <select value={gpuAction} onChange={(event) => setGpuAction(event.target.value as GpuGuardAction)}>
-              <option value="warn">avertir</option>
-              <option value="pause">pause</option>
-              <option value="stop">arreter</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Temp. max C</span>
-            <input
-              type="number"
-              min={1}
-              max={120}
-              value={gpuMaxTemperature}
-              onChange={(event) => setGpuMaxTemperature(event.target.value)}
-              placeholder="80"
-            />
-          </label>
-
-          <label className="field">
-            <span>GPU max %</span>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={gpuMaxUtilization}
-              onChange={(event) => setGpuMaxUtilization(event.target.value)}
-              placeholder="90"
-            />
-          </label>
-
-          <label className="field">
-            <span>Intervalle ms</span>
-            <input
-              type="number"
-              min={1000}
-              value={gpuPollInterval}
-              onChange={(event) => setGpuPollInterval(event.target.value)}
-              placeholder="5000"
-            />
-          </label>
-
-          <div className="composer-actions">
-            <button type="submit" className="primary">
-              Enregistrer la surveillance GPU
-            </button>
-          </div>
-        </form>
-
-        <div className="gpu-guard-meta">
-          <p>
-            Limites : temp. {session?.gpuGuard.policy.maxTemperatureC ?? 'off'} C | usage{' '}
-            {session?.gpuGuard.policy.maxUtilizationPercent ?? 'off'}%
-          </p>
-          {session?.gpuGuard.updatedAt ? <p className="muted">Mise a jour : {session.gpuGuard.updatedAt}</p> : null}
-          {session?.gpuGuard.reasons.length ? <p className="gpu-warning">{session.gpuGuard.reasons.join(' | ')}</p> : null}
-          {session?.gpuGuard.error ? <p className="gpu-warning">{session.gpuGuard.error}</p> : null}
-        </div>
-
-        <div className="gpu-device-list">
-          {session?.gpuGuard.devices.length ? (
-            session.gpuGuard.devices.map((device) => (
-              <article key={device.name} className="gpu-device">
-                <strong>{device.name}</strong>
-                <p>
-                  Temp. : {device.temperatureC ?? 'n/a'} C | Usage : {device.utilizationPercent ?? 'n/a'}%
-                </p>
-              </article>
-            ))
-          ) : (
-            <p className="muted">Aucune telemetrie GPU en direct pour l'instant. Active la surveillance pour relever les metriques locales.</p>
-          )}
-        </div>
-      </section>
-
-      <section className="workspace-roots">
-        <p className="section-label">Racines du workspace</p>
-        {session?.workspaceFolders.length ? (
-          <div className="root-list">
-            {session.workspaceFolders.map((folder) => (
-              <button
-                key={folder}
-                type="button"
-                className="root-pill"
-                onClick={() => setCommandCwd(folder)}
-              >
-                {folder}
-              </button>
-            ))}
+                <div className="active-editor-excerpt">
+                  <strong>Extrait injecte</strong>
+                  <p className="muted">
+                    Lignes {activeEditorContext.excerptStartLine}-{activeEditorContext.excerptEndLine}
+                  </p>
+                  <pre>{activeEditorContext.excerpt}</pre>
+                </div>
+              </div>
+            </details>
           </div>
         ) : (
-          <p className="muted">Ouvre un dossier dans VS Code pour activer le terminal et les actions agent.</p>
+          <p className="muted">
+            Ouvre un fichier du workspace dans l editeur principal pour que l agent voie automatiquement le contexte courant.
+          </p>
         )}
       </section>
+
+      <details
+        className="fold-panel"
+        open={advancedPanelOpen}
+        onToggle={(event) => setAdvancedPanelOpen((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className="fold-summary">
+          <div>
+            <strong>Reglages avances</strong>
+            <p className="muted">{advancedSummary}</p>
+          </div>
+          <span className="fold-chevron" aria-hidden="true">
+            ▾
+          </span>
+        </summary>
+
+        <div className="fold-content">
+          <section className="control-grid">
+            <label className="field">
+              <span>Fournisseur</span>
+              <select
+                value={selectedProfileId}
+                onChange={(event) => handleProfileChange(event.target.value)}
+                disabled={!session || session.profiles.length === 0 || session.isBusy}
+              >
+                {session?.profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Mode</span>
+              <select
+                value={selectedMode}
+                onChange={(event) => setSelectedMode(event.target.value as AppMode)}
+                disabled={session?.isBusy}
+              >
+                <option value="chat">discussion</option>
+                <option value="edit">edition - texte</option>
+                <option value="run">execution - texte</option>
+                <option value="agent">agent - modifie le workspace</option>
+              </select>
+              <p className="field-hint">Le mode agent pilote directement le workspace. Les autres modes restent textuels.</p>
+            </label>
+
+            <label className="field field-wide">
+              <span>Modele</span>
+              <input
+                type="text"
+                value={modelInput}
+                onChange={(event) => setModelInput(event.target.value)}
+                placeholder={activeProfile?.model ?? 'Choisir un modele'}
+                disabled={session?.isBusy}
+              />
+            </label>
+
+            <div className="field field-wide">
+              <span>Temperature</span>
+              <div className="temperature-row">
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={Number.isFinite(Number(temperatureInput)) ? Number(temperatureInput) : 1}
+                  onChange={(event) => {
+                    setTemperatureInput(event.target.value);
+                    setIsTemperatureDirty(true);
+                  }}
+                  disabled={session?.isBusy}
+                />
+                <input
+                  className="temperature-input"
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.05}
+                  value={temperatureInput}
+                  onChange={(event) => {
+                    setTemperatureInput(event.target.value);
+                    setIsTemperatureDirty(true);
+                  }}
+                  disabled={session?.isBusy}
+                />
+              </div>
+              <p className="field-hint">0 = deterministe, 2 = creatif. Valeur appliquee au prochain run.</p>
+            </div>
+
+            <label className="field field-wide">
+              <span>System prompt (optionnel)</span>
+              <textarea
+                rows={4}
+                value={systemPromptInput}
+                onChange={(event) => {
+                  setSystemPromptInput(event.target.value);
+                  setIsSystemPromptDirty(true);
+                }}
+                placeholder="Ajoute des instructions de haut niveau appliquees a toutes les discussions."
+                disabled={session?.isBusy}
+              />
+            </label>
+
+            <div className="field field-wide">
+              <span>Approbations</span>
+              <div className="approval-toggles">
+                <label className="toggle-chip">
+                  <input
+                    type="checkbox"
+                    checked={autoApproveWorkspaceEdits}
+                    onChange={(event) => setAutoApproveWorkspaceEdits(event.target.checked)}
+                    disabled={session?.isBusy}
+                  />
+                  <span>Fichiers auto-approuves</span>
+                </label>
+
+                <label className="toggle-chip">
+                  <input
+                    type="checkbox"
+                    checked={autoApproveTerminal}
+                    onChange={(event) => setAutoApproveTerminal(event.target.checked)}
+                    disabled={session?.isBusy}
+                  />
+                  <span>Terminal auto-approuve</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="field field-wide control-actions">
+              <button type="button" className="secondary action-button" onClick={handleSaveSelection} disabled={!canSaveSelection}>
+                Sauvegarder
+              </button>
+            </div>
+          </section>
+
+          <section className="provider-card">
+            <div>
+              <strong>{activeProfile?.label ?? 'Aucun profil selectionne'}</strong>
+              <p>
+                {activeProfile?.providerType ?? 'n/a'}
+                {activeProfile?.isLocal ? ' | local' : ' | cloud'}
+              </p>
+            </div>
+            <div className="provider-actions">
+              {activeProfile?.providerType === 'ollama' ? (
+                <button type="button" className="secondary action-button" onClick={handleStartOllama}>
+                  Demarrer Ollama
+                </button>
+              ) : null}
+              <div className={`secret-state ${activeProfile?.hasApiKey === false && !activeProfile?.isLocal ? 'missing' : ''}`}>
+                {activeProfile?.isLocal ? 'Aucune cle requise' : activeProfile?.hasApiKey ? 'Cle API configuree' : 'Cle API manquante'}
+              </div>
+            </div>
+          </section>
+
+          <section className="workspace-roots">
+            <p className="section-label">Racines du workspace</p>
+            {session?.workspaceFolders.length ? (
+              <div className="root-list">
+                {session.workspaceFolders.map((folder) => (
+                  <button
+                    key={folder}
+                    type="button"
+                    className="root-pill"
+                    onClick={() => setCommandCwd(folder)}
+                  >
+                    {folder}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Ouvre un dossier dans VS Code pour activer le terminal et les actions agent.</p>
+            )}
+          </section>
+
+          <section className="gpu-guard-card">
+            <div className="panel-head">
+              <div>
+                <strong>Surveillance GPU</strong>
+                <p className="muted">
+                  {formatGpuGuardStatus(session?.gpuGuard.status)} | fournisseur {formatGpuProvider(session?.gpuGuard.provider)} |
+                  {' '}action {formatGpuAction(session?.gpuGuard.policy.action)}
+                </p>
+              </div>
+              <div className={`status-pill ${session?.gpuGuard.limitExceeded ? 'busy' : ''}`}>
+                {session?.gpuGuard.limitExceeded ? 'Seuil depasse' : 'Dans les limites'}
+              </div>
+            </div>
+
+            <form className="gpu-guard-form" onSubmit={handleGpuGuardSave}>
+              <label className="field checkbox-field">
+                <span>Active</span>
+                <input type="checkbox" checked={gpuGuardEnabled} onChange={(event) => setGpuGuardEnabled(event.target.checked)} />
+              </label>
+
+              <label className="field">
+                <span>Fournisseur</span>
+                <select value={gpuProvider} onChange={(event) => setGpuProvider(event.target.value as GpuGuardProvider)}>
+                  <option value="off">desactive</option>
+                  <option value="auto">auto</option>
+                  <option value="nvidia-smi">nvidia-smi</option>
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Action</span>
+                <select value={gpuAction} onChange={(event) => setGpuAction(event.target.value as GpuGuardAction)}>
+                  <option value="warn">avertir</option>
+                  <option value="pause">pause</option>
+                  <option value="stop">arreter</option>
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Temp. max C</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={gpuMaxTemperature}
+                  onChange={(event) => setGpuMaxTemperature(event.target.value)}
+                  placeholder="80"
+                />
+              </label>
+
+              <label className="field">
+                <span>GPU max %</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={gpuMaxUtilization}
+                  onChange={(event) => setGpuMaxUtilization(event.target.value)}
+                  placeholder="90"
+                />
+              </label>
+
+              <label className="field">
+                <span>Intervalle ms</span>
+                <input
+                  type="number"
+                  min={1000}
+                  value={gpuPollInterval}
+                  onChange={(event) => setGpuPollInterval(event.target.value)}
+                  placeholder="5000"
+                />
+              </label>
+
+              <div className="composer-actions">
+                <button type="submit" className="primary">
+                  Enregistrer la surveillance GPU
+                </button>
+              </div>
+            </form>
+
+            <div className="gpu-guard-meta">
+              <p>
+                Limites : temp. {session?.gpuGuard.policy.maxTemperatureC ?? 'off'} C | usage{' '}
+                {session?.gpuGuard.policy.maxUtilizationPercent ?? 'off'}%
+              </p>
+              {session?.gpuGuard.updatedAt ? <p className="muted">Mise a jour : {session.gpuGuard.updatedAt}</p> : null}
+              {session?.gpuGuard.reasons.length ? <p className="gpu-warning">{session.gpuGuard.reasons.join(' | ')}</p> : null}
+              {session?.gpuGuard.error ? <p className="gpu-warning">{session.gpuGuard.error}</p> : null}
+            </div>
+
+            <div className="gpu-device-list">
+              {session?.gpuGuard.devices.length ? (
+                session.gpuGuard.devices.map((device) => (
+                  <article key={device.name} className="gpu-device">
+                    <strong>{device.name}</strong>
+                    <p>
+                      Temp. : {device.temperatureC ?? 'n/a'} C | Usage : {device.utilizationPercent ?? 'n/a'}%
+                    </p>
+                  </article>
+                ))
+              ) : (
+                <p className="muted">
+                  Aucune telemetrie GPU en direct pour l'instant. Active la surveillance pour relever les metriques locales.
+                </p>
+              )}
+            </div>
+          </section>
+        </div>
+      </details>
 
       {errorText ? <div className="error-banner">{errorText}</div> : null}
 
@@ -757,110 +877,6 @@ export function App() {
         </section>
       ) : null}
 
-      <section className="tool-grid">
-        <section className="panel panel-terminal">
-          <div className="panel-head">
-            <h2>Terminal et tests</h2>
-            {runningCommand ? (
-              <button type="button" className="mini-button danger" onClick={() => handleStopCommand(runningCommand.runId)}>
-                Arreter l'execution
-              </button>
-            ) : null}
-          </div>
-
-          <div className="preset-row">
-            {COMMAND_PRESETS.map((preset) => (
-              <button
-                key={preset.command}
-                type="button"
-                className="root-pill"
-                onClick={() => handleCommandPreset(preset.command)}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-
-          <form className="terminal-form" onSubmit={handleCommandSubmit}>
-            <input
-              type="text"
-              value={commandInput}
-              onChange={(event) => setCommandInput(event.target.value)}
-              placeholder="Commande a executer, par exemple npm test"
-            />
-            <input
-              type="text"
-              value={commandCwd}
-              onChange={(event) => setCommandCwd(event.target.value)}
-              placeholder="Dossier de travail dans le workspace"
-            />
-            <div className="composer-actions">
-              <button type="submit" className="primary">
-                Lancer la commande
-              </button>
-            </div>
-          </form>
-
-          <div className="policy-box">
-            <strong>Politique</strong>
-            <p>Auto-approbation fichiers : {session?.terminalPolicy.autoApproveWorkspaceEdits ? 'activee' : 'desactivee'}</p>
-            <p>Auto-approbation terminal : {session?.terminalPolicy.autoApproveTerminal ? 'activee' : 'desactivee'}</p>
-            <p>Liste autorisee : {(session?.terminalPolicy.commandAllowList ?? []).join(', ') || 'aucune'}</p>
-          </div>
-
-          {session?.pendingCommandApproval ? (
-            <div className="approval-box">
-              <strong>Approbation requise</strong>
-              <p>{session.pendingCommandApproval.command}</p>
-              <p className="muted">{session.pendingCommandApproval.cwd}</p>
-              <div className="composer-actions">
-                <button type="button" className="secondary" onClick={() => handleCommandApproval('rejected')}>
-                  Refuser
-                </button>
-                <button type="button" className="primary" onClick={() => handleCommandApproval('approved')}>
-                  Approuver
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="terminal-history">
-            {session?.commandHistory.length ? (
-              session.commandHistory.map((entry) => (
-                <article key={entry.runId} className={`terminal-run ${entry.status}`}>
-                  <div className="panel-head">
-                    <div>
-                      <strong>{entry.label ?? entry.command}</strong>
-                      <p className="muted">
-                        {entry.cwd} | {formatCommandStatus(entry.status)}
-                        {entry.exitCode !== undefined ? ` | code ${String(entry.exitCode)}` : ''}
-                      </p>
-                    </div>
-                    {entry.status === 'running' ? (
-                      <button type="button" className="mini-button danger" onClick={() => handleStopCommand(entry.runId)}>
-                        Arreter
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="terminal-output">
-                    <div>
-                      <span className="section-label">stdout</span>
-                      <pre>{entry.stdout || '(vide)'}</pre>
-                    </div>
-                    <div>
-                      <span className="section-label">stderr</span>
-                      <pre>{entry.stderr || '(vide)'}</pre>
-                    </div>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="muted">Lance ici les tests, le lint ou le build. Les sorties sont capturees et gardees dans l'historique.</p>
-            )}
-          </div>
-        </section>
-      </section>
-
       {queuedPrompts.length ? (
         <section className="queue-box">
           <div className="panel-head">
@@ -883,36 +899,194 @@ export function App() {
         </section>
       ) : null}
 
-      {session ? (
-        <section className="memory-box">
-          <div className="panel-head">
-            <div>
-              <strong>Memoire et historique</strong>
-              <p className="muted">Les taches terminees restent sauvegardees dans ce workspace et sont reinjectees dans les prochains runs.</p>
-            </div>
+      <details
+        className="fold-panel fold-panel-secondary"
+        open={workspaceToolsOpen}
+        onToggle={(event) => setWorkspaceToolsOpen((event.currentTarget as HTMLDetailsElement).open)}
+      >
+        <summary className="fold-summary">
+          <div>
+            <strong>Outils et historique</strong>
+            <p className="muted">{toolsSummary}</p>
           </div>
-          <div className="memory-list">
-            {session.taskHistory.length ? (
-              session.taskHistory.slice(0, 12).map((entry) => (
-                <article key={entry.id} className={`history-card ${entry.status}`}>
+          <span className="fold-chevron" aria-hidden="true">
+            ▾
+          </span>
+        </summary>
+
+        <div className="fold-content">
+          <section className="tool-grid">
+            <section className="panel panel-terminal">
+              <div className="panel-head">
+                <h2>Terminal et tests</h2>
+                {runningCommand ? (
+                  <button type="button" className="mini-button danger" onClick={() => handleStopCommand(runningCommand.runId)}>
+                    Arreter l'execution
+                  </button>
+                ) : null}
+              </div>
+
+              <div className="preset-row">
+                {COMMAND_PRESETS.map((preset) => (
+                  <button
+                    key={preset.command}
+                    type="button"
+                    className="root-pill"
+                    onClick={() => handleCommandPreset(preset.command)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+
+              <form className="terminal-form" onSubmit={handleCommandSubmit}>
+                <input
+                  type="text"
+                  value={commandInput}
+                  onChange={(event) => setCommandInput(event.target.value)}
+                  placeholder="Commande a executer, par exemple npm test"
+                />
+                <input
+                  type="text"
+                  value={commandCwd}
+                  onChange={(event) => setCommandCwd(event.target.value)}
+                  placeholder="Dossier de travail dans le workspace"
+                />
+                <div className="composer-actions">
+                  <button type="submit" className="primary">
+                    Lancer la commande
+                  </button>
+                </div>
+              </form>
+
+              <div className="policy-box">
+                <strong>Politique</strong>
+                <p>Auto-approbation fichiers : {session?.terminalPolicy.autoApproveWorkspaceEdits ? 'activee' : 'desactivee'}</p>
+                <p>Auto-approbation terminal : {session?.terminalPolicy.autoApproveTerminal ? 'activee' : 'desactivee'}</p>
+                <p>Liste autorisee : {(session?.terminalPolicy.commandAllowList ?? []).join(', ') || 'aucune'}</p>
+              </div>
+
+              {session?.pendingCommandApproval ? (
+                <div className="approval-box">
+                  <strong>Approbation requise</strong>
+                  <p>{session.pendingCommandApproval.command}</p>
+                  <p className="muted">{session.pendingCommandApproval.cwd}</p>
+                  <div className="composer-actions">
+                    <button type="button" className="secondary" onClick={() => handleCommandApproval('rejected')}>
+                      Refuser
+                    </button>
+                    <button type="button" className="primary" onClick={() => handleCommandApproval('approved')}>
+                      Approuver
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="terminal-history">
+                {session?.commandHistory.length ? (
+                  session.commandHistory.map((entry) => (
+                    <article key={entry.runId} className={`terminal-run ${entry.status}`}>
+                      <div className="panel-head">
+                        <div>
+                          <strong>{entry.label ?? entry.command}</strong>
+                          <p className="muted">
+                            {entry.cwd} | {formatCommandStatus(entry.status)}
+                            {entry.exitCode !== undefined ? ` | code ${String(entry.exitCode)}` : ''}
+                          </p>
+                        </div>
+                        {entry.status === 'running' ? (
+                          <button type="button" className="mini-button danger" onClick={() => handleStopCommand(entry.runId)}>
+                            Arreter
+                          </button>
+                        ) : null}
+                      </div>
+                      <div className="terminal-output">
+                        <div>
+                          <span className="section-label">stdout</span>
+                          <pre>{entry.stdout || '(vide)'}</pre>
+                        </div>
+                        <div>
+                          <span className="section-label">stderr</span>
+                          <pre>{entry.stderr || '(vide)'}</pre>
+                        </div>
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <p className="muted">Lance ici les tests, le lint ou le build. Les sorties sont capturees et gardees dans l'historique.</p>
+                )}
+              </div>
+            </section>
+          </section>
+
+          {session ? (
+            <section className="memory-box">
+              <div className="panel-head">
+                <div>
+                  <strong>Memoire et historique</strong>
+                  <p className="muted">
+                    Le profil projet et les taches terminees sont sauvegardes puis reinjectes dans les prochains runs.
+                  </p>
+                </div>
+              </div>
+              {session.projectMemory ? (
+                <article className="history-card project-memory-card">
                   <div className="panel-head">
                     <div>
-                      <strong>{entry.userText}</strong>
+                      <strong>{session.projectMemory.displayName}</strong>
                       <p className="muted">
-                        {formatModeLabel(entry.mode)} | {formatTaskHistoryStatus(entry.status)} | {formatTimestamp(entry.updatedAt)}
+                        Profil projet | {session.projectMemory.workspaceFolders.join(', ') || 'workspace courant'} |{' '}
+                        {formatTimestamp(session.projectMemory.updatedAt)}
                       </p>
                     </div>
-                    {entry.profileLabel ? <span className="section-label">{entry.profileLabel}</span> : null}
+                    <span className="section-label">projet</span>
                   </div>
-                  <p className="history-summary">{entry.summary || 'Tache en cours.'}</p>
+                  {session.projectMemory.description ? (
+                    <p className="history-summary">{session.projectMemory.description}</p>
+                  ) : null}
+                  {session.projectMemory.techStack.length ? (
+                    <div className="meta-chip-row">
+                      {session.projectMemory.techStack.slice(0, 8).map((item) => (
+                        <span key={item} className="meta-chip">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  {session.projectMemory.packageScripts.length ? (
+                    <p className="muted">Scripts: {session.projectMemory.packageScripts.slice(0, 10).join(', ')}</p>
+                  ) : null}
+                  {session.projectMemory.importantFiles.length ? (
+                    <p className="muted">Reperes: {session.projectMemory.importantFiles.slice(0, 10).join(', ')}</p>
+                  ) : null}
                 </article>
-              ))
-            ) : (
-              <p className="muted">La memoire va se remplir a partir des prochaines demandes et restera disponible apres redemarrage.</p>
-            )}
-          </div>
-        </section>
-      ) : null}
+              ) : (
+                <p className="muted">Aucun profil projet detecte pour ce workspace.</p>
+              )}
+              <div className="memory-list">
+                {session.taskHistory.length ? (
+                  session.taskHistory.slice(0, 12).map((entry) => (
+                    <article key={entry.id} className={`history-card ${entry.status}`}>
+                      <div className="panel-head">
+                        <div>
+                          <strong>{entry.userText}</strong>
+                          <p className="muted">
+                            {formatModeLabel(entry.mode)} | {formatTaskHistoryStatus(entry.status)} | {formatTimestamp(entry.updatedAt)}
+                          </p>
+                        </div>
+                        {entry.profileLabel ? <span className="section-label">{entry.profileLabel}</span> : null}
+                      </div>
+                      <p className="history-summary">{entry.summary || 'Tache en cours.'}</p>
+                    </article>
+                  ))
+                ) : (
+                  <p className="muted">La memoire va se remplir a partir des prochaines demandes et restera disponible apres redemarrage.</p>
+                )}
+              </div>
+            </section>
+          ) : null}
+        </div>
+      </details>
 
       <main className="transcript">
         {session?.messages.length ? (
@@ -927,8 +1101,8 @@ export function App() {
           ))
         ) : (
           <div className="empty-state">
-            <h2>Agent + workspace + surveillance GPU</h2>
-            <p>La phase 4 ajoute un agent borne, des approbations, l'historique terminal et des regles GPU en direct.</p>
+            <h2>Decris ce que tu veux changer</h2>
+            <p>Le fichier actif peut etre injecte automatiquement et le mode agent applique ensuite les modifications dans le workspace.</p>
           </div>
         )}
       </main>
@@ -1107,6 +1281,42 @@ function formatGpuAction(action: string | undefined): string {
 
 function formatQueuedPromptCount(count: number): string {
   return `${count} prompt${count > 1 ? 's' : ''} en attente`;
+}
+
+function formatWorkspaceToolsSummary(
+  commandCount: number,
+  taskHistoryCount: number,
+  hasProjectMemory: boolean,
+  hasPendingCommandApproval: boolean,
+  hasRunningCommand: boolean
+): string {
+  const fragments: string[] = [];
+
+  if (hasProjectMemory) {
+    fragments.push('profil projet');
+  }
+
+  if (hasPendingCommandApproval) {
+    fragments.push('approbation terminal en attente');
+  }
+
+  if (hasRunningCommand) {
+    fragments.push('commande en cours');
+  }
+
+  if (commandCount > 0) {
+    fragments.push(`${commandCount} commande${commandCount > 1 ? 's' : ''}`);
+  }
+
+  if (taskHistoryCount > 0) {
+    fragments.push(`${taskHistoryCount} tache${taskHistoryCount > 1 ? 's' : ''} memorisee${taskHistoryCount > 1 ? 's' : ''}`);
+  }
+
+  if (fragments.length === 0) {
+    return 'terminal, tests et historique repliables';
+  }
+
+  return fragments.join(' | ');
 }
 
 function formatModeLabel(mode: AppMode): string {
@@ -1337,7 +1547,7 @@ function createAssistantActivityFromAgentRun(run: SessionStatePayload['currentAg
 function getComposerPlaceholder(mode: AppMode): string {
   switch (mode) {
     case 'agent':
-      return 'Decris une modification concrete a appliquer dans le workspace, puis laisse l agent travailler.';
+      return 'Decris le changement souhaite. Le fichier actif et son extrait seront injectes automatiquement.';
     case 'edit':
     case 'run':
       return 'Ce mode reste textuel pour l instant. Utilise le mode agent si tu veux modifier des fichiers.';

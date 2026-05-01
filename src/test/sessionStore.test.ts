@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { SessionStore } from '../core/session/sessionStore';
 import type {
+  ActiveEditorContext,
   GpuGuardSnapshot,
   PersistedSessionState,
+  ProjectMemorySnapshot,
   QueuedPromptPreview,
   ResolvedProviderProfile,
   TerminalPolicySnapshot
@@ -41,6 +43,32 @@ const profiles: ResolvedProviderProfile[] = [
   }
 ];
 
+const activeEditorContext: ActiveEditorContext = {
+  absolutePath: 'C:/workspace/src/extension.ts',
+  workspacePath: 'src/extension.ts',
+  languageId: 'typescript',
+  isDirty: false,
+  lineCount: 120,
+  cursorLine: 24,
+  cursorCharacter: 7,
+  focusStartLine: 24,
+  focusEndLine: 24,
+  excerptStartLine: 12,
+  excerptEndLine: 36,
+  excerpt: '  24 | vscode.commands.registerCommand(...)'
+};
+
+const projectMemory: ProjectMemorySnapshot = {
+  fingerprint: 'workspace-fingerprint',
+  displayName: 'esctentionIALocal',
+  workspaceFolders: ['workspace'],
+  description: 'Extension VS Code orientee agent de code.',
+  techStack: ['React', 'TypeScript', 'VS Code extension'],
+  packageScripts: ['compile', 'lint', 'test:unit'],
+  importantFiles: ['package.json', 'README.md', 'src/extension.ts'],
+  updatedAt: '2026-04-14T00:00:00.000Z'
+};
+
 export const sessionStoreTests: TestCase[] = [
   {
     name: 'session snapshot exposes queued prompt previews',
@@ -69,11 +97,13 @@ export const sessionStoreTests: TestCase[] = [
         undefined,
         'system prompt',
         undefined,
-        queuedPrompts
+        queuedPrompts,
+        activeEditorContext
       );
 
       assert.equal(snapshot.queuedPrompts.length, 2);
       assert.deepEqual(snapshot.queuedPrompts, queuedPrompts);
+      assert.equal(snapshot.activeEditorContext?.workspacePath, 'src/extension.ts');
       assert.equal(snapshot.isBusy, false);
     }
   },
@@ -81,6 +111,7 @@ export const sessionStoreTests: TestCase[] = [
     name: 'session store tracks task history and injects memory into prompts',
     async run() {
       const store = new SessionStore('chat', 'ollama-local', 'qwen3');
+      store.setProjectMemory(projectMemory);
 
       store.startRun({
         runId: 'run-1',
@@ -99,8 +130,39 @@ export const sessionStoreTests: TestCase[] = [
       assert.equal(snapshot.taskHistory.length, 1);
       assert.equal(snapshot.taskHistory[0]?.status, 'completed');
       assert.equal(snapshot.taskHistory[0]?.summary, 'Application de blocage des touches creee.');
+      assert.equal(snapshot.projectMemory?.displayName, 'esctentionIALocal');
       assert.match(conversation[0]?.content ?? '', /Memoire persistante du workspace/);
+      assert.match(conversation[0]?.content ?? '', /Profil projet courant/);
+      assert.match(conversation[0]?.content ?? '', /Extension VS Code orientee agent de code/);
       assert.match(conversation[0]?.content ?? '', /blocage des touches creee/i);
+    }
+  },
+  {
+    name: 'session store injects project memory without previous task history',
+    async run() {
+      const store = new SessionStore('chat', 'ollama-local', 'qwen3');
+      store.setProjectMemory(projectMemory);
+
+      const conversation = store.buildConversation('system prompt');
+      const persisted = store.exportPersistedState();
+
+      assert.match(conversation[0]?.content ?? '', /Ne redemande pas a quoi correspond le projet/);
+      assert.match(conversation[0]?.content ?? '', /esctentionIALocal/);
+      assert.equal(persisted.projectMemory?.displayName, 'esctentionIALocal');
+    }
+  },
+  {
+    name: 'session store injects active editor context into prompts',
+    async run() {
+      const store = new SessionStore('chat', 'ollama-local', 'qwen3');
+      const conversation = store.buildConversation(
+        'system prompt',
+        undefined,
+        'Contexte automatique de l editeur actif dans VS Code.\n- Fichier actif: src/extension.ts'
+      );
+
+      assert.match(conversation[0]?.content ?? '', /Contexte automatique de l editeur actif/);
+      assert.match(conversation[0]?.content ?? '', /src\/extension\.ts/);
     }
   },
   {

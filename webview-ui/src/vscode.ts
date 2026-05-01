@@ -17,6 +17,9 @@ type StoredState = {
   selectedProfileId?: string;
   selectedMode?: AppMode;
   modelInput?: string;
+  advancedPanelOpen?: boolean;
+  workspaceToolsOpen?: boolean;
+  activeEditorDetailsOpen?: boolean;
 };
 
 const fallbackApi: VsCodeApi<StoredState> = {

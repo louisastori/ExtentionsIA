@@ -1,5 +1,6 @@
 import { createId } from '../protocol/messages';
 import type {
+  ActiveEditorContext,
   AgentToolApprovalRequest,
   AgentRunSnapshot,
   AppMode,
@@ -8,6 +9,7 @@ import type {
   CommandRunRecord,
   GpuGuardSnapshot,
   PersistedSessionState,
+  ProjectMemorySnapshot,
   QueuedPromptPreview,
   ResolvedProviderProfile,
   SessionSnapshot,
@@ -28,6 +30,7 @@ export class SessionStore {
   private readonly messages: TranscriptMessage[];
   private readonly commandHistory: CommandRunRecord[];
   private readonly taskHistory: TaskHistoryEntry[];
+  private projectMemory?: ProjectMemorySnapshot;
   private activeProfileId: string;
   private selectedModel: string;
   private mode: AppMode;
@@ -50,12 +53,17 @@ export class SessionStore {
     this.messages = restoredState?.messages ?? [];
     this.commandHistory = restoredState?.commandHistory ?? [];
     this.taskHistory = restoredState?.taskHistory ?? [];
+    this.projectMemory = restoredState?.projectMemory;
   }
 
   public hydrateSelection(mode: AppMode, profileId: string, model: string): void {
     this.mode = mode;
     this.activeProfileId = profileId;
     this.selectedModel = model;
+  }
+
+  public setProjectMemory(projectMemory: ProjectMemorySnapshot | undefined): void {
+    this.projectMemory = projectMemory;
   }
 
   public startRun(input: {
@@ -251,7 +259,7 @@ export class SessionStore {
     return { ...record };
   }
 
-  public buildConversation(systemPrompt: string, currentRunId?: string): CanonicalChatMessage[] {
+  public buildConversation(systemPrompt: string, currentRunId?: string, activeEditorContext?: string): CanonicalChatMessage[] {
     const transcriptMessages = this.messages
       .filter((message) => message.role === 'user' || message.role === 'assistant')
       .filter((message) => message.status !== 'error' || message.content.trim().length > 0)
@@ -264,7 +272,7 @@ export class SessionStore {
     return [
       {
         role: 'system',
-        content: mergeSystemPromptWithMemory(systemPrompt, this.buildMemoryContext(currentRunId))
+        content: mergeSystemPromptWithContexts(systemPrompt, this.buildMemoryContext(currentRunId), activeEditorContext)
       },
       ...transcriptMessages
     ];
@@ -276,11 +284,17 @@ export class SessionStore {
       .filter((entry) => entry.status !== 'pending_approval')
       .slice(0, MAX_MEMORY_COMMANDS);
 
-    if (recentTasks.length === 0 && recentCommands.length === 0) {
+    if (!this.projectMemory && recentTasks.length === 0 && recentCommands.length === 0) {
       return undefined;
     }
 
-    const sections: string[] = ['Memoire persistante du workspace. Appuie-toi sur cet historique pour savoir ce qui a deja ete fait.'];
+    const sections: string[] = [
+      'Memoire persistante du workspace. Appuie-toi sur le profil projet et l historique pour comprendre le contexte sans redemander ce qu est le projet.'
+    ];
+
+    if (this.projectMemory) {
+      sections.push(formatProjectMemoryContext(this.projectMemory));
+    }
 
     if (recentTasks.length > 0) {
       sections.push('Taches recentes:');
@@ -320,7 +334,8 @@ export class SessionStore {
       selectedModel: this.selectedModel,
       messages: [...this.messages],
       commandHistory: [...this.commandHistory],
-      taskHistory: [...this.taskHistory]
+      taskHistory: [...this.taskHistory],
+      projectMemory: this.projectMemory ? { ...this.projectMemory } : undefined
     };
   }
 
@@ -332,7 +347,8 @@ export class SessionStore {
     defaultTemperature: number | undefined,
     systemPrompt: string | undefined,
     currentAgentRun?: AgentRunSnapshot,
-    queuedPrompts: QueuedPromptPreview[] = []
+    queuedPrompts: QueuedPromptPreview[] = [],
+    activeEditorContext?: ActiveEditorContext
   ): SessionSnapshot {
     return {
       sessionId: this.sessionId,
@@ -352,8 +368,10 @@ export class SessionStore {
       gpuGuard,
       profiles,
       queuedPrompts: [...queuedPrompts],
+      projectMemory: this.projectMemory ? { ...this.projectMemory } : undefined,
       taskHistory: [...this.taskHistory],
-      messages: [...this.messages]
+      messages: [...this.messages],
+      activeEditorContext
     };
   }
 
@@ -455,12 +473,17 @@ function restorePersistedState(state: PersistedSessionState | undefined): Persis
   };
 }
 
-function mergeSystemPromptWithMemory(systemPrompt: string, memoryContext: string | undefined): string {
-  if (!memoryContext) {
+function mergeSystemPromptWithContexts(
+  systemPrompt: string,
+  memoryContext: string | undefined,
+  activeEditorContext: string | undefined
+): string {
+  const blocks = [memoryContext, activeEditorContext].filter((block): block is string => Boolean(block?.trim()));
+  if (blocks.length === 0) {
     return systemPrompt;
   }
 
-  return `${systemPrompt}\n\n${memoryContext}`;
+  return `${systemPrompt}\n\n${blocks.join('\n\n')}`;
 }
 
 function capOutput(value: string): string {
@@ -517,6 +540,33 @@ function formatExitCode(value: number | null | undefined): string {
   }
 
   return value === null ? 'null' : String(value);
+}
+
+function formatProjectMemoryContext(memory: ProjectMemorySnapshot): string {
+  const sections = [
+    'Profil projet courant:',
+    `- Projet: ${memory.displayName}`,
+    `- Racines workspace: ${memory.workspaceFolders.join(', ') || 'workspace courant'}`,
+    '- Consigne: ce profil identifie le projet ouvert. Ne redemande pas a quoi correspond le projet sauf si la demande cite explicitement un autre projet.'
+  ];
+
+  if (memory.description) {
+    sections.push(`- Description: ${memory.description}`);
+  }
+
+  if (memory.techStack.length > 0) {
+    sections.push(`- Stack detectee: ${memory.techStack.join(', ')}`);
+  }
+
+  if (memory.packageScripts.length > 0) {
+    sections.push(`- Scripts disponibles: ${memory.packageScripts.join(', ')}`);
+  }
+
+  if (memory.importantFiles.length > 0) {
+    sections.push(`- Fichiers reperes: ${memory.importantFiles.slice(0, 12).join(', ')}`);
+  }
+
+  return sections.join('\n');
 }
 
 function defaultTaskSummary(status: TaskHistoryEntry['status']): string {

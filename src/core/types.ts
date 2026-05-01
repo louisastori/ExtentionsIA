@@ -93,6 +93,17 @@ export interface TaskHistoryEntry {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
 }
 
+export interface ProjectMemorySnapshot {
+  fingerprint: string;
+  displayName: string;
+  workspaceFolders: string[];
+  description?: string;
+  techStack: string[];
+  packageScripts: string[];
+  importantFiles: string[];
+  updatedAt: string;
+}
+
 export interface QueuedPromptPreview {
   id: string;
   mode: AppMode;
@@ -118,8 +129,34 @@ export interface SessionSnapshot {
   gpuGuard: GpuGuardSnapshot;
   profiles: ResolvedProviderProfile[];
   queuedPrompts: QueuedPromptPreview[];
+  projectMemory?: ProjectMemorySnapshot;
   taskHistory: TaskHistoryEntry[];
   messages: TranscriptMessage[];
+  activeEditorContext?: ActiveEditorContext;
+}
+
+export interface ActiveEditorSelectionContext {
+  startLine: number;
+  startCharacter: number;
+  endLine: number;
+  endCharacter: number;
+  text: string;
+}
+
+export interface ActiveEditorContext {
+  absolutePath: string;
+  workspacePath: string;
+  languageId: string;
+  isDirty: boolean;
+  lineCount: number;
+  cursorLine: number;
+  cursorCharacter: number;
+  focusStartLine: number;
+  focusEndLine: number;
+  excerptStartLine: number;
+  excerptEndLine: number;
+  excerpt: string;
+  selection?: ActiveEditorSelectionContext;
 }
 
 export interface PersistedSessionState {
@@ -131,6 +168,7 @@ export interface PersistedSessionState {
   messages: TranscriptMessage[];
   commandHistory: CommandRunRecord[];
   taskHistory: TaskHistoryEntry[];
+  projectMemory?: ProjectMemorySnapshot;
 }
 
 export interface RunStatusPayload {

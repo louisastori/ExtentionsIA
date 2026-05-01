@@ -29,7 +29,7 @@ import { SessionPersistenceService } from '../core/session/sessionPersistenceSer
 import { SessionStore } from '../core/session/sessionStore';
 import { PatchService } from '../core/workspace/patchService';
 import { TerminalService } from '../core/workspace/terminalService';
-import { WorkspaceService } from '../core/workspace/workspaceService';
+import { formatActiveEditorContext, WorkspaceService } from '../core/workspace/workspaceService';
 import type {
   AgentRunSnapshot,
   AgentToolApprovalRequest,
@@ -49,6 +49,7 @@ type QueuedPromptSubmission = {
   mode: AppMode;
   profileId?: string;
   model?: string;
+  activeEditorContext?: string;
   createdAt: string;
 };
 
@@ -92,6 +93,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       restoredSession
     );
     this.currentGpuGuardState = createEmptyGpuGuardSnapshot(this.configurationService.getGpuGuardPolicy());
+    this.refreshProjectMemory();
   }
 
   public async resolveWebviewView(
@@ -206,11 +208,14 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
   private async handleChatSubmit(message: {
     requestId: string;
     payload: { text: string; mode: AppMode; profileId?: string; model?: string };
-  }): Promise<void> {
+  }, options?: { activeEditorContext?: string }): Promise<void> {
     const rawText = message.payload.text.trim();
     if (rawText.length === 0) {
       return;
     }
+
+    const activeEditorContext = options?.activeEditorContext ?? this.getActiveEditorContextPrompt();
+    this.refreshProjectMemory();
 
     const shouldQueueSubmission =
       !this.isProcessingPromptQueue &&
@@ -226,6 +231,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         mode: message.payload.mode,
         profileId: message.payload.profileId,
         model: message.payload.model?.trim() || undefined,
+        activeEditorContext,
         createdAt: new Date().toISOString()
       });
       await this.postSessionState(message.requestId);
@@ -278,7 +284,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         runId,
         userText: rawText,
         selectedProfile,
-        selectedModel
+        selectedModel,
+        activeEditorContext
       });
       return;
     }
@@ -310,7 +317,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
         model: selectedModel,
         messages: this.sessionStore.buildConversation(
           buildSystemPrompt(message.payload.mode, this.configurationService.getSystemPromptOverride()),
-          runId
+          runId,
+          activeEditorContext
         ),
         signal: this.currentAbortController.signal
       });
@@ -375,6 +383,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
     const profiles = await this.providerRegistry.getResolvedProfiles();
     const defaultTemperature = this.configurationService.getDefaultTemperature();
     const systemPrompt = this.configurationService.getSystemPromptOverride();
+    const activeEditorContext = this.workspaceService.getActiveEditorContext();
+    this.refreshProjectMemory();
     await this.sessionPersistence.save(this.sessionStore.exportPersistedState());
     this.postMessage(
       createHostMessage(
@@ -387,7 +397,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           defaultTemperature,
           systemPrompt,
           this.currentAgentRun,
-          this.queuedPromptSubmissions.map((submission) => createQueuedPromptPreview(submission))
+          this.queuedPromptSubmissions.map((submission) => createQueuedPromptPreview(submission)),
+          activeEditorContext
         ),
         requestId
       )
@@ -418,6 +429,8 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
           profileId: nextSubmission.profileId,
           model: nextSubmission.model
         }
+      }, {
+        activeEditorContext: nextSubmission.activeEditorContext
       });
     } finally {
       this.isProcessingPromptQueue = false;
@@ -554,6 +567,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       userText: string;
       selectedProfile: ResolvedProviderProfile;
       selectedModel: string;
+      activeEditorContext?: string;
     }
   ): Promise<void> {
     if (this.currentAgentHandle) {
@@ -579,6 +593,7 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       model: input.selectedModel,
       goal: input.userText,
       memoryContext: this.sessionStore.buildMemoryContext(input.runId),
+      activeEditorContext: input.activeEditorContext,
       policy: this.configurationService.getAgentLoopPolicy(),
       signal: this.currentAbortController.signal,
       onStatus: (snapshot) => {
@@ -1006,6 +1021,19 @@ export class ChatWebviewProvider implements vscode.WebviewViewProvider {
       this.configurationService.getProvidersConfig().profiles.find((profile) => profile.providerType === 'ollama')?.baseUrl ??
       'http://localhost:11434'
     );
+  }
+
+  private getActiveEditorContextPrompt(): string | undefined {
+    const activeEditorContext = this.workspaceService.getActiveEditorContext();
+    if (!activeEditorContext) {
+      return undefined;
+    }
+
+    return formatActiveEditorContext(activeEditorContext);
+  }
+
+  private refreshProjectMemory(): void {
+    this.sessionStore.setProjectMemory(this.workspaceService.buildProjectMemory());
   }
 }
 

@@ -54,6 +54,7 @@ export const agentOrchestratorTests: TestCase[] = [
           profileId: 'profile',
           goal: 'Finish the task',
           model: 'model',
+          activeEditorContext: 'Contexte automatique de l editeur actif dans VS Code. - Fichier actif: src/extension.ts',
           policy: basePolicy,
           onStatus: (snapshot) => {
             statuses.push(snapshot);
@@ -67,6 +68,7 @@ export const agentOrchestratorTests: TestCase[] = [
       assert.equal(finalStatus.summary, 'Task complete without tools.');
       assert.equal(statuses[0]?.status, 'running');
       assert.match(String(capturedMessages[0]?.[0]?.content), /Reponds toujours en francais/);
+      assert.match(String(capturedMessages[0]?.[0]?.content), /Contexte automatique de l editeur actif/);
     }
   },
   {

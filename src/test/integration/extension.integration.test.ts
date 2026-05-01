@@ -41,11 +41,42 @@ suite('Extension Integration', () => {
     assert.ok(result.matches.some((match) => match.absolutePath.endsWith(path.join('src', 'extension.ts'))));
   });
 
+  test('workspace service exposes the active editor context for prompt injection', async () => {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    assert.ok(workspaceFolders && workspaceFolders.length > 0, 'A workspace folder should be open for integration tests');
+
+    const workspaceRoot = workspaceFolders[0].uri.fsPath;
+    const targetFile = path.join(workspaceRoot, 'src', 'extension.ts');
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(targetFile));
+    const editor = await vscode.window.showTextDocument(document, {
+      preview: false
+    });
+    const registerCommandLine = document
+      .getText()
+      .split(/\r?\n/)
+      .findIndex((line) => line.includes('registerCommand'));
+    assert.ok(registerCommandLine >= 0, 'The fixture file should contain registerCommand calls');
+
+    editor.selection = new vscode.Selection(
+      new vscode.Position(registerCommandLine, 0),
+      new vscode.Position(registerCommandLine + 1, 10)
+    );
+
+    const workspaceService = new WorkspaceService();
+    const context = workspaceService.getActiveEditorContext();
+
+    assert.ok(context, 'Active editor context should be available');
+    assert.equal(context?.workspacePath, path.join('src', 'extension.ts'));
+    assert.equal(context?.selection?.startLine, registerCommandLine + 1);
+    assert.equal(context?.selection?.endLine, registerCommandLine + 2);
+    assert.match(context?.excerpt ?? '', /registerCommand/);
+  });
+
   test('configuration defaults are exposed through VS Code settings', () => {
     const configurationService = new ConfigurationService();
     const providers = configurationService.getProvidersConfig();
 
-    assert.equal(configurationService.getDefaultMode(), 'chat');
+    assert.equal(configurationService.getDefaultMode(), 'agent');
     assert.equal(configurationService.isLocalOnlyMode(), true);
     assert.ok(providers.profiles.length > 0);
     assert.equal(providers.activeProfileId, 'ollama-gemma4-26b-local');

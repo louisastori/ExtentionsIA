@@ -6,6 +6,10 @@ param(
   [string]$VsixUrl,
   [string]$Model = 'gemma4:26b',
   [string]$OllamaInstallDir,
+  [string]$OllamaBaseUrl = 'http://127.0.0.1:11434',
+  [int]$OllamaStartTimeoutSeconds = 600,
+  [int]$ModelPullAttempts = 3,
+  [int]$ModelPullRetryDelaySeconds = 10,
   [switch]$ForceOllamaInstall,
   [switch]$SkipVsixInstall,
   [switch]$SkipOllamaInstall,
@@ -14,6 +18,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$OllamaBaseUrl = $OllamaBaseUrl.TrimEnd('/')
 
 function Write-Step {
   param([string]$Message)
@@ -87,7 +92,7 @@ function Resolve-OllamaCli {
 
 function Test-OllamaReachable {
   try {
-    Invoke-RestMethod -Uri 'http://localhost:11434/api/version' -Method Get -TimeoutSec 2 | Out-Null
+    Invoke-RestMethod -Uri "$OllamaBaseUrl/api/version" -Method Get -TimeoutSec 2 | Out-Null
     return $true
   } catch {
     return $false
@@ -106,7 +111,7 @@ function Wait-Ollama {
     Start-Sleep -Milliseconds 500
   }
 
-  throw 'Ollama ne repond pas sur http://localhost:11434 apres le delai imparti.'
+  throw "Ollama ne repond pas sur $OllamaBaseUrl apres le delai imparti."
 }
 
 function Install-Ollama {
@@ -135,6 +140,11 @@ function Install-Ollama {
 }
 
 function Start-OllamaIfNeeded {
+  param(
+    [int]$TimeoutSeconds = 600,
+    [switch]$ContinueOnTimeout
+  )
+
   $ollamaCli = Resolve-OllamaCli
   if (-not $ollamaCli) {
     throw "Impossible de trouver l'executable Ollama apres installation."
@@ -146,7 +156,16 @@ function Start-OllamaIfNeeded {
 
   Write-Step 'Demarrage d''Ollama'
   Start-Process -FilePath $ollamaCli -ArgumentList 'serve' -WindowStyle Hidden | Out-Null
-  Wait-Ollama
+  try {
+    Wait-Ollama -TimeoutSeconds $TimeoutSeconds
+  } catch {
+    if (-not $ContinueOnTimeout) {
+      throw
+    }
+
+    Write-Warning "Ollama ne repond pas encore apres $TimeoutSeconds secondes. Le script continue et retentera avant le telechargement du modele."
+  }
+
   return $ollamaCli
 }
 
@@ -212,11 +231,40 @@ function Install-Vsix {
 function Install-Model {
   param(
     [Parameter(Mandatory = $true)][string]$CliPath,
-    [Parameter(Mandatory = $true)][string]$ModelName
+    [Parameter(Mandatory = $true)][string]$ModelName,
+    [int]$Attempts = 3,
+    [int]$RetryDelaySeconds = 10,
+    [int]$OllamaTimeoutSeconds = 600
   )
 
   Write-Step "Telechargement du modele $ModelName"
-  & $CliPath 'pull' $ModelName
+  $lastExitCode = 0
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    try {
+      Wait-Ollama -TimeoutSeconds $OllamaTimeoutSeconds
+      & $CliPath 'pull' $ModelName
+      $lastExitCode = $LASTEXITCODE
+      if ($lastExitCode -eq 0) {
+        return
+      }
+    } catch {
+      Write-Warning "Tentative $attempt/$Attempts impossible : $($_.Exception.Message)"
+      $lastExitCode = 1
+    }
+
+    if ($attempt -lt $Attempts) {
+      Write-Warning "Le telechargement du modele a echoue. Nouvelle tentative dans $RetryDelaySeconds secondes."
+      try {
+        Start-OllamaIfNeeded -TimeoutSeconds $OllamaTimeoutSeconds -ContinueOnTimeout | Out-Null
+      } catch {
+        Write-Warning "Redemarrage d'Ollama impossible pour le moment : $($_.Exception.Message)"
+      }
+
+      Start-Sleep -Seconds $RetryDelaySeconds
+    }
+  }
+
+  throw "Impossible de telecharger le modele $ModelName automatiquement apres $Attempts tentative(s). Dernier code de sortie : $lastExitCode."
 }
 
 Write-Step 'Preparation du bootstrap Windows'
@@ -240,11 +288,15 @@ try {
   }
 
   if (-not $SkipOllamaInstall -or -not $SkipModelPull) {
-    $ollamaCli = Start-OllamaIfNeeded
+    if (-not $SkipModelPull) {
+      $ollamaCli = Start-OllamaIfNeeded -TimeoutSeconds $OllamaStartTimeoutSeconds -ContinueOnTimeout
+    } else {
+      $ollamaCli = Start-OllamaIfNeeded -TimeoutSeconds $OllamaStartTimeoutSeconds
+    }
   }
 
   if (-not $SkipModelPull) {
-    Install-Model -CliPath $ollamaCli -ModelName $Model
+    Install-Model -CliPath $ollamaCli -ModelName $Model -Attempts $ModelPullAttempts -RetryDelaySeconds $ModelPullRetryDelaySeconds -OllamaTimeoutSeconds $OllamaStartTimeoutSeconds
   }
 
   Write-Host ''

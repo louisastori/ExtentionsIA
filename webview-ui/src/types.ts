@@ -34,6 +34,17 @@ export interface TaskHistoryEntry {
   status: 'running' | 'completed' | 'failed' | 'cancelled';
 }
 
+export interface ProjectMemorySnapshot {
+  fingerprint: string;
+  displayName: string;
+  workspaceFolders: string[];
+  description?: string;
+  techStack: string[];
+  packageScripts: string[];
+  importantFiles: string[];
+  updatedAt: string;
+}
+
 export interface QueuedPromptPreview {
   id: string;
   mode: AppMode;
@@ -59,8 +70,34 @@ export interface SessionSnapshot {
   gpuGuard: GpuGuardSnapshot;
   profiles: ResolvedProviderProfile[];
   queuedPrompts: QueuedPromptPreview[];
+  projectMemory?: ProjectMemorySnapshot;
   taskHistory: TaskHistoryEntry[];
   messages: TranscriptMessage[];
+  activeEditorContext?: ActiveEditorContext;
+}
+
+export interface ActiveEditorSelectionContext {
+  startLine: number;
+  startCharacter: number;
+  endLine: number;
+  endCharacter: number;
+  text: string;
+}
+
+export interface ActiveEditorContext {
+  absolutePath: string;
+  workspacePath: string;
+  languageId: string;
+  isDirty: boolean;
+  lineCount: number;
+  cursorLine: number;
+  cursorCharacter: number;
+  focusStartLine: number;
+  focusEndLine: number;
+  excerptStartLine: number;
+  excerptEndLine: number;
+  excerpt: string;
+  selection?: ActiveEditorSelectionContext;
 }
 
 export interface WorkspaceFileReadResult {
@@ -237,6 +274,8 @@ export type UiMessage =
       }
     >
   | MessageEnvelope<'ui.agent.stop', { runId?: string }>
+  | MessageEnvelope<'ui.agent.pause', { runId?: string }>
+  | MessageEnvelope<'ui.agent.resume', { runId?: string }>
   | MessageEnvelope<'ui.workspace.readFile', { workspacePath: string }>
   | MessageEnvelope<'ui.workspace.search', { pattern: string; maxResults?: number }>
   | MessageEnvelope<
